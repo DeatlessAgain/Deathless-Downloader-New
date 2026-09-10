@@ -103,6 +103,11 @@ export const DownloadHistory: React.FC<DownloadHistoryProps> = ({
     return 0;
   });
 
+  // Strict deduplication by ID to prevent any duplicate key errors from persisted storage
+  const uniqueSortedItems = sortedItems.filter((item, index, self) =>
+    index === self.findIndex((t) => t.id === item.id)
+  );
+
   const totalBytes = history.reduce((acc, i) => acc + (i.downloadedBytes || 0), 0);
 
   const formatBytes = (bytes: number): string => {
@@ -313,7 +318,7 @@ export const DownloadHistory: React.FC<DownloadHistoryProps> = ({
       </div>
 
       {/* History Items List */}
-      {sortedItems.length === 0 ? (
+      {uniqueSortedItems.length === 0 ? (
         <div
           className={`p-10 rounded-2xl border text-center ${
             darkMode ? 'bg-zinc-900/60 border-zinc-800' : 'bg-white border-slate-200'
@@ -327,7 +332,7 @@ export const DownloadHistory: React.FC<DownloadHistoryProps> = ({
         </div>
       ) : (
         <div className="space-y-3">
-          {sortedItems.map((item) => {
+          {uniqueSortedItems.map((item, index) => {
             const fileName =
               item.fileName ||
               `${item.title.replace(/[^a-zA-Z0-9_\-\s]/g, '').trim().replace(/\s+/g, '_')}_${item.quality.qualityTag}.${item.format}`;
@@ -336,7 +341,7 @@ export const DownloadHistory: React.FC<DownloadHistoryProps> = ({
 
             return (
               <div
-                key={item.id}
+                key={`${item.id}_${index}`}
                 id={`history-row-${item.id}`}
                 className={`p-4 rounded-2xl border transition-all hover:shadow-md ${
                   darkMode

@@ -128,7 +128,20 @@ export function getDownloadHistory(): DownloadItem[] {
   try {
     const raw = localStorage.getItem(HISTORY_KEY);
     if (!raw) return getDefaultInitialHistory();
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return getDefaultInitialHistory();
+    
+    // Deduplicate items by ID to prevent duplicate keys across updates
+    const seen = new Set<string>();
+    const deduplicated: DownloadItem[] = [];
+    for (const item of parsed) {
+      if (!item || !item.id) continue;
+      if (!seen.has(item.id)) {
+        seen.add(item.id);
+        deduplicated.push(item);
+      }
+    }
+    return deduplicated.length > 0 ? deduplicated : getDefaultInitialHistory();
   } catch {
     return getDefaultInitialHistory();
   }
@@ -136,7 +149,15 @@ export function getDownloadHistory(): DownloadItem[] {
 
 export function saveDownloadHistory(history: DownloadItem[]): void {
   try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    if (!Array.isArray(history)) return;
+    const seen = new Set<string>();
+    const deduplicated = history.filter((item) => {
+      if (!item || !item.id) return false;
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(deduplicated));
   } catch (err) {
     console.error('Failed to save history to storage:', err);
   }
@@ -177,8 +198,13 @@ export function createDownloadItem(
   const folder = settings.defaultDownloadFolder || '~/Downloads/Deathless';
   const downloadPath = `${folder}/${fileName}`;
 
+  const uniqueSuffix =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID().replace(/-/g, '').substring(0, 10)
+      : Math.random().toString(36).substring(2, 8) + Math.random().toString(36).substring(2, 8);
+
   const item: DownloadItem = {
-    id: 'dl_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+    id: 'dl_' + Date.now() + '_' + uniqueSuffix,
     title: info.title,
     fileName,
     downloadPath,

@@ -237,8 +237,8 @@ export const StreamDebuggerModal: React.FC<StreamDebuggerModalProps> = ({
                     : 'bg-white border-slate-300 text-slate-800'
                 }`}
               >
-                {sessions.map((s) => (
-                  <option key={s.downloadId} value={s.downloadId}>
+                {sessions.map((s, idx) => (
+                  <option key={`${s.downloadId}_${idx}`} value={s.downloadId}>
                     {s.fileName} ({formatBytes(s.bytesReceived)} / {formatBytes(s.totalBytesExpected)}) [{s.status}]
                   </option>
                 ))}
@@ -614,8 +614,8 @@ export const StreamDebuggerModal: React.FC<StreamDebuggerModalProps> = ({
                     </div>
 
                     <div className="p-3 max-h-72 overflow-y-auto space-y-1.5">
-                      {currentSession.logs.map((log) => (
-                        <div key={log.id} className="flex items-start gap-2 leading-relaxed">
+                      {currentSession.logs.map((log, idx) => (
+                        <div key={`${log.id}_${idx}`} className="flex items-start gap-2 leading-relaxed">
                           <span className="text-zinc-600 select-none">
                             {new Date(log.timestamp).toLocaleTimeString()}
                           </span>

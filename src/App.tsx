@@ -108,9 +108,15 @@ export default function App() {
   }, [settings.smartCleanupEnabled, settings.smartCleanupDays, activeItems.length]);
 
   const downloadHandlesRef = useRef<Map<string, ActiveDownloadHandle>>(new Map());
+  const completedItemIdsRef = useRef<Set<string>>(new Set());
 
   // Trigger completion sequence for an item
   const handleItemCompleted = (completedItem: DownloadItem, realBlob?: Blob) => {
+    if (completedItemIdsRef.current.has(completedItem.id)) {
+      return;
+    }
+    completedItemIdsRef.current.add(completedItem.id);
+
     try {
       confetti({ particleCount: 50, spread: 60, origin: { y: 0.8 } });
     } catch {
@@ -141,7 +147,8 @@ export default function App() {
     executeUniversalDownload(completedItem, realBlob);
 
     setHistory((prevHist) => {
-      const newHist = [completedItem, ...prevHist];
+      const filtered = prevHist.filter((h) => h.id !== completedItem.id);
+      const newHist = [completedItem, ...filtered];
       saveDownloadHistory(newHist);
       return newHist;
     });
@@ -312,7 +319,11 @@ export default function App() {
     encryptInVault: boolean
   ) => {
     const newItem = createDownloadItem(info, quality, true, encryptInVault);
-    setActiveItems((prev) => [newItem, ...prev]);
+    completedItemIdsRef.current.delete(newItem.id);
+    setActiveItems((prev) => {
+      const filtered = prev.filter((item) => item.id !== newItem.id);
+      return [newItem, ...filtered];
+    });
     setCurrentTab('downloader');
   };
 
@@ -400,7 +411,13 @@ export default function App() {
       return createDownloadItem(mediaInfo, b.quality, true, settings.saveToEncryptedVault);
     });
 
-    setActiveItems((prev) => [...newDownloads, ...prev]);
+    newDownloads.forEach((d) => completedItemIdsRef.current.delete(d.id));
+
+    setActiveItems((prev) => {
+      const newIds = new Set(newDownloads.map((d) => d.id));
+      const filtered = prev.filter((item) => !newIds.has(item.id));
+      return [...newDownloads, ...filtered];
+    });
     setCurrentTab('downloader');
   };
 

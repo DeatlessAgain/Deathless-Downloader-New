@@ -217,6 +217,11 @@ export const ActiveDownloads: React.FC<ActiveDownloadsProps> = ({
     return 0;
   });
 
+  // Strict deduplication by ID to prevent any duplicate key errors in UI rendering
+  const uniqueSortedItems = sortedItems.filter((item, index, self) =>
+    index === self.findIndex((t) => t.id === item.id)
+  );
+
   if (items.length === 0) {
     return (
       <div
@@ -541,7 +546,7 @@ export const ActiveDownloads: React.FC<ActiveDownloadsProps> = ({
 
       {/* Item Cards */}
       <div className="space-y-3">
-        {sortedItems.length === 0 ? (
+        {uniqueSortedItems.length === 0 ? (
           <div
             className={`p-8 rounded-2xl border text-center ${
               darkMode ? 'bg-zinc-900/40 border-zinc-800' : 'bg-white border-slate-200'
@@ -550,7 +555,7 @@ export const ActiveDownloads: React.FC<ActiveDownloadsProps> = ({
             <p className="text-xs text-slate-400">No transfers match the current filter or search criteria.</p>
           </div>
         ) : (
-          sortedItems.map((item) => {
+          uniqueSortedItems.map((item, index) => {
           const progressPercent = Math.min(
             100,
             Math.max(0, Math.round((item.downloadedBytes / (item.totalBytes || 1)) * 100))
@@ -562,7 +567,7 @@ export const ActiveDownloads: React.FC<ActiveDownloadsProps> = ({
 
           return (
             <div
-              key={item.id}
+              key={`${item.id}_${index}`}
               id={`transfer-item-${item.id}`}
               className={`rounded-2xl border p-4 sm:p-5 transition-all shadow-sm ${
                 darkMode

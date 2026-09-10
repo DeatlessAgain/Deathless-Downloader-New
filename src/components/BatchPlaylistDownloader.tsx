@@ -524,7 +524,7 @@ export function BatchPlaylistDownloader({
             <div className="max-h-[380px] overflow-y-auto space-y-2 pr-1">
               {queue.map((item, index) => (
                 <div
-                  key={item.id}
+                  key={`${item.id}_${index}`}
                   className={`p-3 rounded-xl border flex items-center justify-between gap-3 transition ${
                     darkMode ? 'bg-zinc-900/80 border-zinc-800' : 'bg-white border-slate-200 shadow-sm'
                   }`}

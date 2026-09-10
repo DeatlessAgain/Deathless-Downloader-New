@@ -502,9 +502,9 @@ export const FileConverter: React.FC<FileConverterProps> = ({
                 No downloaded files in history yet. Download a media stream or choose "Sample Media".
               </p>
             ) : (
-              history.map((item) => (
+              history.map((item, idx) => (
                 <div
-                  key={item.id}
+                  key={`${item.id}_${idx}`}
                   onClick={() => handleSelectFromHistory(item)}
                   className={`p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition-all ${
                     selectedFileName === (item.fileName || item.title)

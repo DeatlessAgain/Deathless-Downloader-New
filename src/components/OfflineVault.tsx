@@ -984,7 +984,7 @@ export const OfflineVault: React.FC<OfflineVaultProps> = ({ initialFileToPlay, d
                     </div>
                   ) : (
                     previewRenames.map((item, idx) => (
-                      <div key={item.id} className="p-2.5 text-xs flex items-center justify-between gap-3">
+                      <div key={`${item.id}_${idx}`} className="p-2.5 text-xs flex items-center justify-between gap-3">
                         <div className="min-w-0 flex-1">
                           <div className="text-slate-400 dark:text-zinc-500 truncate text-[11px]" title={item.originalTitle}>
                             <span className="font-mono text-[10px] mr-1.5 opacity-60">

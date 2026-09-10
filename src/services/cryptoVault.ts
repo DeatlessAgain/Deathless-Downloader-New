@@ -197,7 +197,11 @@ export async function createEncryptedMediaRecord(
   realBlob?: Blob,
   sourceUrl?: string
 ): Promise<VaultFile> {
-  const id = 'vault_' + Math.random().toString(36).substring(2, 9);
+  const uniqueRand =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID().replace(/-/g, '').substring(0, 8)
+      : Math.random().toString(36).substring(2, 9);
+  const id = 'vault_' + Date.now() + '_' + uniqueRand;
   
   // Use real blob if available, otherwise synthetic playable audio/media
   const blobToStore = realBlob || generatePlayableMediaBlob(category, title);
@@ -206,7 +210,7 @@ export async function createEncryptedMediaRecord(
 
   const newFile: VaultFile = {
     id,
-    downloadId: 'dl_' + Date.now(),
+    downloadId: 'dl_' + Date.now() + '_' + uniqueRand,
     title,
     category,
     format,
