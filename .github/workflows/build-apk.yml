@@ -19,16 +19,28 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
-          cache: 'gradle'
+
+      - name: Setup Node.js & Build Web UI
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build Web & Sync Android
+        run: |
+          npm install
+          npm run build
+          npx cap sync android
 
       - name: Fix Executable Permissions
         run: chmod +x gradlew
+        working-directory: android
 
       - name: Compile Kotlin and Assemble APK
         run: ./gradlew assembleDebug --no-daemon
+        working-directory: android
 
       - name: Export Output Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Deathless-Downloader-Debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
