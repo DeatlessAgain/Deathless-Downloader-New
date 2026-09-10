@@ -1,0 +1,12 @@
+{
+	"appId": "com.deathless.downloader",
+	"appName": "Deathless Downloader",
+	"webDir": "dist",
+	"server": {
+		"androidScheme": "https",
+		"cleartext": true
+	},
+	"plugins": {
+		"Filesystem": {}
+	}
+}

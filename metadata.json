@@ -1,0 +1,8 @@
+{
+  "name": "Deathless Downloader",
+  "description": "High-speed universal media and massive file downloader with media format converter, speed limiter, automatic completion notifications, encrypted vault, social feed browser, and advanced sorting/filtering.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

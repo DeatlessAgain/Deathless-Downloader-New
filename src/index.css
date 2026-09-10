@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+:root {
+  --color-accent-primary: #06b6d4;
+  --color-accent-hover: #0891b2;
+  --color-accent-subtle: rgba(6, 182, 212, 0.12);
+  --color-accent-border: rgba(6, 182, 212, 0.25);
+}
+
+:root[data-accent="emerald"] {
+  --color-accent-primary: #10b981;
+  --color-accent-hover: #059669;
+  --color-accent-subtle: rgba(16, 185, 129, 0.12);
+  --color-accent-border: rgba(16, 185, 129, 0.25);
+}
+
+:root[data-accent="violet"] {
+  --color-accent-primary: #8b5cf6;
+  --color-accent-hover: #7c3aed;
+  --color-accent-subtle: rgba(139, 92, 246, 0.12);
+  --color-accent-border: rgba(139, 92, 246, 0.25);
+}
+
+:root[data-accent="orange"] {
+  --color-accent-primary: #f97316;
+  --color-accent-hover: #ea580c;
+  --color-accent-subtle: rgba(249, 115, 22, 0.12);
+  --color-accent-border: rgba(249, 115, 22, 0.25);
+}
+
+:root[data-accent="cyan"] {
+  --color-accent-primary: #06b6d4;
+  --color-accent-hover: #0891b2;
+  --color-accent-subtle: rgba(6, 182, 212, 0.12);
+  --color-accent-border: rgba(6, 182, 212, 0.25);
+}
+
+:root[data-accent="rose"] {
+  --color-accent-primary: #f43f5e;
+  --color-accent-hover: #e11d48;
+  --color-accent-subtle: rgba(244, 63, 94, 0.12);
+  --color-accent-border: rgba(244, 63, 94, 0.25);
+}
+
+:root[data-accent="blue"] {
+  --color-accent-primary: #3b82f6;
+  --color-accent-hover: #2563eb;
+  --color-accent-subtle: rgba(59, 130, 246, 0.12);
+  --color-accent-border: rgba(59, 130, 246, 0.25);
+}
+
+html,
+body {
+  overflow-x: hidden;
+  max-width: 100vw;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-text-size-adjust: 100%;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+#root {
+  overflow-x: hidden;
+  max-width: 100vw;
+  width: 100%;
+  min-height: 100vh;
+}
+
+/* Hide scrollbars for mobile tab strips and pills */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
