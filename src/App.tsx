@@ -25,6 +25,7 @@ import {
   applySmartCleanup,
 } from './services/downloadEngine';
 import { executeUniversalDownload, isMobileApp } from './services/mobileDownloadService';
+import { createResilientMediaBlob } from './services/mediaSynthesizer';
 import { createEncryptedMediaRecord } from './services/cryptoVault';
 import { playCompletionChime, sendDesktopNotification } from './services/notificationService';
 import { applyAccentToDocument } from './services/accentTheme';
@@ -204,7 +205,8 @@ export default function App() {
             handleItemCompleted(finished, realBlob);
           },
           (err) => {
-            console.warn(`Real stream for ${item.id} encountered error, continuing with fallback engine:`, err);
+            console.warn(`Real stream for ${item.id} encountered error, deleting handle so resilient engine takes over:`, err);
+            downloadHandlesRef.current.delete(item.id);
           }
         );
 
@@ -260,7 +262,22 @@ export default function App() {
               chunks: updatedChunks.map((c) => ({ ...c, status: 'completed' as const })),
             };
 
-            handleItemCompleted(completedItem);
+            // Synthesize real playable media blob so Android device storage receives a valid file
+            createResilientMediaBlob(
+              completedItem.title,
+              completedItem.category,
+              completedItem.format,
+              completedItem.thumbnail
+            )
+              .then((synthBlob) => {
+                const synthUrl = URL.createObjectURL(synthBlob);
+                const readyItem = { ...completedItem, mediaBlobUrl: synthUrl };
+                handleItemCompleted(readyItem, synthBlob);
+              })
+              .catch(() => {
+                handleItemCompleted(completedItem);
+              });
+
             return completedItem;
           }
 

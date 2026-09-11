@@ -330,7 +330,19 @@ export function startRealDownloadStream(
       }
 
       logStreamEvent(item.id, 'info', `Connecting to stream endpoint: ${activeFetchUrl}`);
-      const response = await fetch(activeFetchUrl, { signal: controller.signal });
+      const timeoutId = setTimeout(() => {
+        try {
+          controller.abort();
+        } catch {}
+      }, 7000);
+
+      let response: Response;
+      try {
+        response = await fetch(activeFetchUrl, { signal: controller.signal });
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
       if (!response.ok || !response.body) {
         throw new Error(`Server returned HTTP ${response.status}`);
       }
