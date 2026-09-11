@@ -24,6 +24,7 @@ import {
   StreamHeaderInfo,
   DownloadItem,
 } from '../types';
+import { getApiUrl } from '../services/apiConfig';
 import {
   getAllStreamSessions,
   subscribeToStreamDebug,
@@ -142,7 +143,7 @@ export const StreamDebuggerModal: React.FC<StreamDebuggerModalProps> = ({
 
       if (!blob) {
         setSaveStatusMessage('Downloading stream buffer to assemble test Blob...');
-        const streamUrl = `/api/download?url=${encodeURIComponent(activeDownloadItem.originalUrl)}&formatId=${encodeURIComponent(activeDownloadItem.quality.formatId || '')}&format=${encodeURIComponent(activeDownloadItem.format)}&isAudioOnly=${activeDownloadItem.quality.isAudioOnly}&title=${encodeURIComponent(activeDownloadItem.title)}`;
+        const streamUrl = getApiUrl(`/api/download?url=${encodeURIComponent(activeDownloadItem.originalUrl)}&formatId=${encodeURIComponent(activeDownloadItem.quality.formatId || '')}&format=${encodeURIComponent(activeDownloadItem.format)}&isAudioOnly=${activeDownloadItem.quality.isAudioOnly}&title=${encodeURIComponent(activeDownloadItem.title)}`);
         const res = await fetch(streamUrl);
         blob = await res.blob();
       }

@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { DownloadItem, ConversionTask, ConversionOptions } from '../types';
 import { isMobileApp, saveMediaToMobileFilesystem } from '../services/mobileDownloadService';
+import { getApiUrl } from '../services/apiConfig';
 
 interface FileConverterProps {
   history: DownloadItem[];
@@ -312,7 +313,7 @@ export const FileConverter: React.FC<FileConverterProps> = ({
           formData.append('audioBitrateKbps', audioBitrate.toString());
           if (videoResolution) formData.append('videoResolution', videoResolution);
 
-          fetch('/api/convert', { method: 'POST', body: formData })
+          fetch(getApiUrl('/api/convert'), { method: 'POST', body: formData })
             .then(async (res) => {
               if (res.ok) {
                 const b = await res.blob();

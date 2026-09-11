@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { StreamHeaderInfo, StreamDebugLog, StreamSessionDebug, SaveResult } from '../types';
+import { getApiUrl } from './apiConfig';
 
 // In-memory debug sessions store
 const sessionsMap = new Map<string, StreamSessionDebug>();
@@ -207,7 +208,8 @@ export async function probeStreamHeaders(
     if (options.isAudioOnly) params.set('isAudioOnly', 'true');
     if (options.title) params.set('title', options.title);
 
-    const res = await fetch(`/api/stream-headers?${params.toString()}`);
+    const streamHeadersUrl = getApiUrl(`/api/stream-headers?${params.toString()}`);
+    const res = await fetch(streamHeadersUrl);
     if (!res.ok) {
       throw new Error(`Server returned HTTP ${res.status}: ${res.statusText}`);
     }

@@ -1,4 +1,5 @@
 import { ExtractedMediaInfo, PlatformType, QualityOption, CdnMetadata } from '../types';
+import { getApiUrl } from './apiConfig';
 
 export function detectPlatform(url: string): PlatformType {
   const lower = url.toLowerCase();
@@ -277,14 +278,80 @@ export function inspectMediaUrl(rawUrl: string): ExtractedMediaInfo {
   };
 }
 
+// Direct client-side metadata fetcher for YouTube, TikTok, Twitter, Reddit
+async function fetchClientMetadataFallback(url: string, platform: PlatformType): Promise<Partial<ExtractedMediaInfo> | null> {
+  try {
+    if (platform === 'youtube') {
+      const oembedRes = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`);
+      if (oembedRes.ok) {
+        const data = await oembedRes.json();
+        const match = url.match(/(?:youtu\.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=|shorts\/)([^#&?]*)/);
+        const videoId = match && match[1] ? match[1] : null;
+        const thumbnail = videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : (data.thumbnail_url || '');
+        return {
+          title: data.title || 'YouTube Media Video',
+          author: data.author_name || 'YouTube Creator',
+          thumbnail,
+          duration: 'Direct Media',
+        };
+      }
+    } else if (platform === 'tiktok') {
+      try {
+        const tikwmRes = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}`);
+        if (tikwmRes.ok) {
+          const resJson = await tikwmRes.json();
+          if (resJson.code === 0 && resJson.data) {
+            const d = resJson.data;
+            return {
+              title: d.title || 'TikTok Video',
+              author: d.author?.nickname || d.author?.unique_id || 'TikTok Creator',
+              thumbnail: d.cover || d.origin_cover || '',
+              duration: d.duration ? `${Math.floor(d.duration / 60)}:${String(d.duration % 60).padStart(2, '0')}` : '00:45',
+            };
+          }
+        }
+      } catch {}
+      const oembedRes = await fetch(`https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`);
+      if (oembedRes.ok) {
+        const data = await oembedRes.json();
+        return {
+          title: data.title || 'TikTok Video',
+          author: data.author_name || '@tiktok_user',
+          thumbnail: data.thumbnail_url || '',
+        };
+      }
+    } else if (platform === 'twitter') {
+      const oembedRes = await fetch(`https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}`);
+      if (oembedRes.ok) {
+        const data = await oembedRes.json();
+        return {
+          title: data.html ? data.html.replace(/<[^>]*>?/gm, '').slice(0, 100) : 'X / Twitter Post Media',
+          author: data.author_name || '@twitter_user',
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('Direct client metadata fetch failed:', err);
+  }
+  return null;
+}
+
 export async function inspectMediaUrlAsync(rawUrl: string): Promise<ExtractedMediaInfo> {
   const clean = rawUrl.trim();
+
+  // 1. Call Backend API (/api/inspect) via dynamic getApiUrl (resolves to Cloud Run backend in APK)
   try {
-    const res = await fetch('/api/inspect', {
+    const inspectUrl = getApiUrl('/api/inspect');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
+    const res = await fetch(inspectUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url: clean }),
+      signal: controller.signal,
     });
+    clearTimeout(timer);
+
     if (res.ok) {
       const data = await res.json();
       if (data && data.title && data.availableQualities && data.availableQualities.length > 0) {
@@ -292,7 +359,21 @@ export async function inspectMediaUrlAsync(rawUrl: string): Promise<ExtractedMed
       }
     }
   } catch (err) {
-    console.warn('Backend inspect unreachable, using local fallback parser:', err);
+    console.warn('Backend inspect unreachable, querying client extraction:', err);
   }
-  return inspectMediaUrl(clean);
+
+  // 2. Real Client-side metadata fetcher (oEmbed / Direct APIs)
+  const baseInfo = inspectMediaUrl(clean);
+  const clientMeta = await fetchClientMetadataFallback(clean, baseInfo.platform);
+  if (clientMeta) {
+    return {
+      ...baseInfo,
+      title: clientMeta.title || baseInfo.title,
+      author: clientMeta.author || baseInfo.author,
+      thumbnail: clientMeta.thumbnail || baseInfo.thumbnail,
+      duration: clientMeta.duration || baseInfo.duration,
+    };
+  }
+
+  return baseInfo;
 }

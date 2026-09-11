@@ -1,5 +1,6 @@
 import { DownloadItem, AlternateStreamOption, ManualDownloadMirror, ChunkProgress } from '../types';
 import { saveMediaBlobImproved } from './streamDebugService';
+import { getApiUrl } from './apiConfig';
 
 export interface AlternativeStreamResult {
   success: boolean;
@@ -88,7 +89,8 @@ export async function resolveAlternativeStreams(
   const videoId = extractYouTubeVideoId(url);
 
   try {
-    const res = await fetch(`/api/resolve-alternative-streams?url=${encodeURIComponent(url)}&isAudioOnly=${isAudioOnly}`, {
+    const resolveEndpoint = getApiUrl(`/api/resolve-alternative-streams?url=${encodeURIComponent(url)}&isAudioOnly=${isAudioOnly}`);
+    const res = await fetch(resolveEndpoint, {
       method: 'GET',
       headers: { 'Accept': 'application/json' },
     });

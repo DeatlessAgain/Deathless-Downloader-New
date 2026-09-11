@@ -1,6 +1,7 @@
 import { DownloadItem, ChunkProgress, QualityOption, ExtractedMediaInfo } from '../types';
 import { createEncryptedMediaRecord } from './cryptoVault';
 import { AccentColor } from './accentTheme';
+import { getApiUrl } from './apiConfig';
 import {
   initStreamDebugSession,
   recordStreamHeaders,
@@ -268,7 +269,7 @@ export function triggerBrowserFileDownload(item: DownloadItem, realBlob?: Blob):
   }
 
   // Direct server stream download
-  const downloadUrl = `/api/download?url=${encodeURIComponent(item.originalUrl)}&formatId=${encodeURIComponent(item.quality.formatId || '')}&format=${encodeURIComponent(item.format)}&isAudioOnly=${item.quality.isAudioOnly}&title=${encodeURIComponent(item.title)}`;
+  const downloadUrl = getApiUrl(`/api/download?url=${encodeURIComponent(item.originalUrl)}&formatId=${encodeURIComponent(item.quality.formatId || '')}&format=${encodeURIComponent(item.format)}&isAudioOnly=${item.quality.isAudioOnly}&title=${encodeURIComponent(item.title)}`);
   const a = document.createElement('a');
   a.href = downloadUrl;
   a.download = item.fileName || `${item.title.substring(0, 30)}.${item.format}`;
@@ -293,7 +294,7 @@ export function startRealDownloadStream(
   let isPaused = false;
   let aborted = false;
 
-  const downloadUrl = `/api/download?url=${encodeURIComponent(item.originalUrl)}&formatId=${encodeURIComponent(item.quality.formatId || '')}&format=${encodeURIComponent(item.format)}&isAudioOnly=${item.quality.isAudioOnly}&title=${encodeURIComponent(item.title)}`;
+  const downloadUrl = getApiUrl(`/api/download?url=${encodeURIComponent(item.originalUrl)}&formatId=${encodeURIComponent(item.quality.formatId || '')}&format=${encodeURIComponent(item.format)}&isAudioOnly=${item.quality.isAudioOnly}&title=${encodeURIComponent(item.title)}`);
 
   // Initialize stream debug session
   initStreamDebugSession(item.id, item.originalUrl, item.fileName, item.totalBytes);

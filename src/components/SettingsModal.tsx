@@ -28,8 +28,17 @@ import {
   RefreshCw,
   Lock,
   Globe,
+  Server,
+  Wifi,
 } from 'lucide-react';
 import { AppSettings } from '../services/downloadEngine';
+import {
+  getApiUrl,
+  getBackendBaseUrl,
+  setBackendBaseUrl,
+  DEFAULT_BACKEND_URL,
+  isMobileNative,
+} from '../services/apiConfig';
 import { getStorageEstimate, StorageEstimateResult } from '../services/cryptoVault';
 import {
   playCompletionChime,
@@ -108,8 +117,34 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     return bytes + ' B';
   };
 
+  // Backend Server Status & Config
+  const [backendUrl, setBackendUrlState] = useState<string>(getBackendBaseUrl() || DEFAULT_BACKEND_URL);
+  const [backendStatus, setBackendStatus] = useState<'idle' | 'checking' | 'connected' | 'error'>('idle');
+  const [backendStatusMsg, setBackendStatusMsg] = useState<string>('');
+  const [showBackendBox, setShowBackendBox] = useState<boolean>(false);
+
+  const testBackendConnection = async (targetUrl?: string) => {
+    const urlToTest = (targetUrl !== undefined ? targetUrl : backendUrl).trim().replace(/\/+$/, '');
+    setBackendStatus('checking');
+    setBackendStatusMsg('Testing API connection...');
+    try {
+      const res = await fetch(`${urlToTest}/api/health`, { signal: AbortSignal.timeout(6000) });
+      if (res.ok) {
+        const data = await res.json();
+        setBackendStatus('connected');
+        setBackendStatusMsg(`Online • yt-dlp ${data.ytdlp ? 'Ready' : 'Present'}`);
+      } else {
+        setBackendStatus('error');
+        setBackendStatusMsg(`HTTP ${res.status}: ${res.statusText}`);
+      }
+    } catch (e: any) {
+      setBackendStatus('error');
+      setBackendStatusMsg('Unreachable: ' + (e.message || 'Check network'));
+    }
+  };
+
   useEffect(() => {
-    fetch('/api/cookies')
+    fetch(getApiUrl('/api/cookies'))
       .then((r) => r.json())
       .then((data) => {
         if (data && data.hasCookies) {
@@ -118,12 +153,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         }
       })
       .catch(() => {});
+
+    // Initial check for mobile app backend health
+    if (isMobileNative()) {
+      testBackendConnection(backendUrl);
+    }
   }, []);
 
   const handleSaveCookies = async () => {
     if (!cookieInputText.trim()) return;
     try {
-      const res = await fetch('/api/cookies', {
+      const res = await fetch(getApiUrl('/api/cookies'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ cookiesText: cookieInputText }),
@@ -145,7 +185,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const handleClearCookies = async () => {
     try {
-      await fetch('/api/cookies', { method: 'DELETE' });
+      await fetch(getApiUrl('/api/cookies'), { method: 'DELETE' });
       setHasCookies(false);
       setCookieLineCount(0);
       setCookieMsg('Cookies cleared.');
@@ -187,6 +227,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setBackendBaseUrl(backendUrl);
     const updatedSettings = { ...localSettings, darkMode: localDarkMode };
     onSave(updatedSettings);
     if (onToggleDarkMode && localDarkMode !== darkMode) {
@@ -1119,6 +1160,121 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <span>{cookieMsg}</span>
                   </div>
                 )}
+              </div>
+            )}
+          </div>
+
+          {/* Cloud Run Backend Server API Endpoint for APK / Web */}
+          <div
+            id="settings-backend-server-section"
+            className={`p-4 rounded-xl border space-y-3 ${
+              darkMode ? 'bg-zinc-800/40 border-zinc-800' : 'bg-slate-50 border-slate-200/80'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-cyan-500/10 text-cyan-500 flex items-center justify-center">
+                  <Server className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <div className="font-semibold text-xs flex items-center gap-2">
+                    <span>Backend Cloud Server (yt-dlp Engine)</span>
+                    {backendStatus === 'connected' ? (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        Connected
+                      </span>
+                    ) : backendStatus === 'checking' ? (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-cyan-500/10 text-cyan-500 border border-cyan-500/20">
+                        Checking...
+                      </span>
+                    ) : backendStatus === 'error' ? (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/10 text-rose-500 border border-rose-500/20">
+                        Offline / Error
+                      </span>
+                    ) : (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-500/10 text-slate-500 border border-slate-500/20">
+                        {isMobileNative() ? 'Mobile Active' : 'Cloud Ready'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-slate-500 dark:text-zinc-400">
+                    Provides yt-dlp parsing, direct video streaming, and media conversions for APK
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => testBackendConnection()}
+                  className={`px-2.5 py-1 text-[11px] font-medium rounded-lg border transition-colors flex items-center gap-1 ${
+                    darkMode
+                      ? 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-zinc-700'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <Wifi className="w-3 h-3" />
+                  <span>Test</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowBackendBox(!showBackendBox)}
+                  className={`px-2.5 py-1 text-[11px] font-medium rounded-lg border transition-colors ${
+                    showBackendBox
+                      ? 'bg-zinc-700 text-white border-zinc-600'
+                      : darkMode
+                        ? 'bg-zinc-800 text-zinc-300 border-zinc-700 hover:bg-zinc-700'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  {showBackendBox ? 'Close' : 'Config'}
+                </button>
+              </div>
+            </div>
+
+            {backendStatusMsg && (
+              <div
+                className={`text-[11px] px-2.5 py-1.5 rounded-lg border flex items-center gap-1.5 font-mono ${
+                  backendStatus === 'connected'
+                    ? 'bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                    : backendStatus === 'error'
+                      ? 'bg-rose-500/5 text-rose-600 dark:text-rose-400 border-rose-500/20'
+                      : 'bg-cyan-500/5 text-cyan-600 dark:text-cyan-400 border-cyan-500/20'
+                }`}
+              >
+                <span>{backendStatusMsg}</span>
+              </div>
+            )}
+
+            {showBackendBox && (
+              <div className="pt-2 border-t border-slate-200/60 dark:border-zinc-700/60 space-y-2 animate-fadeIn">
+                <label className="text-[11px] font-medium text-slate-600 dark:text-zinc-300 block">
+                  Backend Server API Base URL:
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="url"
+                    value={backendUrl}
+                    onChange={(e) => setBackendUrlState(e.target.value)}
+                    placeholder="https://ais-pre-....run.app"
+                    className={`flex-1 text-xs font-mono px-3 py-1.5 rounded-lg border focus:outline-none focus:ring-2 focus:ring-cyan-500 ${
+                      darkMode ? 'bg-zinc-900 border-zinc-700 text-zinc-200' : 'bg-white border-slate-300 text-slate-800'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBackendUrlState(DEFAULT_BACKEND_URL);
+                      testBackendConnection(DEFAULT_BACKEND_URL);
+                    }}
+                    className="px-2.5 py-1.5 text-xs text-slate-500 hover:text-slate-700 dark:hover:text-zinc-300 border border-dashed rounded-lg transition-colors"
+                  >
+                    Reset Default
+                  </button>
+                </div>
+                <div className="text-[10px] text-slate-400 dark:text-zinc-500">
+                  Default: <code className="font-mono">{DEFAULT_BACKEND_URL}</code>
+                </div>
               </div>
             )}
           </div>

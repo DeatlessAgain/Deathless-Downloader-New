@@ -2,6 +2,7 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Capacitor } from '@capacitor/core';
 import { DownloadItem } from '../types';
 import { saveMediaBlobImproved } from './streamDebugService';
+import { getApiUrl } from './apiConfig';
 
 export function isMobileApp(): boolean {
   return Capacitor.isNativePlatform();
@@ -91,7 +92,7 @@ export async function executeUniversalDownload(
 
   if (!blobToSave) {
     try {
-      const downloadUrl = `/api/download?url=${encodeURIComponent(item.originalUrl)}&formatId=${encodeURIComponent(item.quality.formatId || '')}&format=${encodeURIComponent(item.format)}&isAudioOnly=${item.quality.isAudioOnly}&title=${encodeURIComponent(item.title)}`;
+      const downloadUrl = getApiUrl(`/api/download?url=${encodeURIComponent(item.originalUrl)}&formatId=${encodeURIComponent(item.quality.formatId || '')}&format=${encodeURIComponent(item.format)}&isAudioOnly=${item.quality.isAudioOnly}&title=${encodeURIComponent(item.title)}`);
       const res = await fetch(downloadUrl);
       blobToSave = await res.blob();
     } catch (err) {
@@ -113,7 +114,7 @@ export async function executeUniversalDownload(
   }
 
   // Final fallback: direct link click to streaming endpoint
-  const downloadUrl = `/api/download?url=${encodeURIComponent(item.originalUrl)}&formatId=${encodeURIComponent(item.quality.formatId || '')}&format=${encodeURIComponent(item.format)}&isAudioOnly=${item.quality.isAudioOnly}&title=${encodeURIComponent(item.title)}`;
+  const downloadUrl = getApiUrl(`/api/download?url=${encodeURIComponent(item.originalUrl)}&formatId=${encodeURIComponent(item.quality.formatId || '')}&format=${encodeURIComponent(item.format)}&isAudioOnly=${item.quality.isAudioOnly}&title=${encodeURIComponent(item.title)}`);
   const a = document.createElement('a');
   a.href = downloadUrl;
   a.download = fileName;
