@@ -28,7 +28,7 @@ import {
 } from 'lucide-react';
 import { DownloadItem, PlatformType } from '../types';
 import { triggerBrowserFileDownload } from '../services/downloadEngine';
-import { executeUniversalDownload } from '../services/mobileDownloadService';
+import { executeUniversalDownload, isMobileDevice } from '../services/mobileDownloadService';
 import { AccentColor, getAccentTheme } from '../services/accentTheme';
 import { AlternativePlayerModal } from './AlternativePlayerModal';
 import { triggerDirectBrowserDownload } from '../services/clientMediaResolver';
@@ -77,6 +77,7 @@ export const ActiveDownloads: React.FC<ActiveDownloadsProps> = ({
   const [platformFilter, setPlatformFilter] = useState<'all' | PlatformType>('all');
   const [sortBy, setSortBy] = useState<'date-desc' | 'progress-desc' | 'speed-desc' | 'size-desc' | 'name-asc'>('date-desc');
   const [alternativeModalItem, setAlternativeModalItem] = useState<DownloadItem | null>(null);
+  const [savingItemId, setSavingItemId] = useState<string | null>(null);
 
   const toggleChunkDetails = (id: string) => {
     setExpandedChunks((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -654,32 +655,48 @@ export const ActiveDownloads: React.FC<ActiveDownloadsProps> = ({
                       <button
                         type="button"
                         id={`save-disk-btn-${item.id}`}
-                        onClick={() => {
+                        disabled={savingItemId === item.id}
+                        onClick={async () => {
                           if (item.botChallengeTriggered || item.isFallbackStream) {
                             const proceed = window.confirm(
-                              `Notice: This file is only ${formatBytes(item.downloadedBytes)} because YouTube blocked the cloud IP with a bot challenge ("Sign in to confirm you're not a bot").\n\nTo download the full ${formatBytes(item.totalBytes)} video, configure YouTube Cookies in Settings.\n\nClick OK to save this 127 KB preview clip anyway, or Cancel to open Settings.`
+                              `Notice: This file is only ${formatBytes(item.downloadedBytes)} because YouTube blocked the cloud IP with a bot challenge ("Sign in to confirm you're not a bot").\n\nTo download the full ${formatBytes(item.totalBytes)} video, configure YouTube Cookies in Settings.\n\nClick OK to save this preview clip anyway, or Cancel to open Settings.`
                             );
                             if (!proceed) {
                               if (onOpenSettings) onOpenSettings();
                               return;
                             }
                           }
-                          executeUniversalDownload(item);
+                          setSavingItemId(item.id);
+                          try {
+                            await executeUniversalDownload(item);
+                          } finally {
+                            setTimeout(() => setSavingItemId(null), 2500);
+                          }
                         }}
                         className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm transition-all text-white ${
-                          item.botChallengeTriggered || item.isFallbackStream
-                            ? 'bg-amber-600 hover:bg-amber-500'
-                            : 'bg-cyan-600 hover:bg-cyan-500'
+                          savingItemId === item.id
+                            ? 'bg-emerald-600 animate-pulse'
+                            : item.botChallengeTriggered || item.isFallbackStream
+                              ? 'bg-amber-600 hover:bg-amber-500'
+                              : 'bg-cyan-600 hover:bg-cyan-500'
                         }`}
                         title={
                           item.botChallengeTriggered
-                            ? 'Save 127 KB fallback clip (configure cookies for full size)'
-                            : 'Save file to local computer or device storage'
+                            ? 'Save fallback clip (configure cookies for full size)'
+                            : isMobileDevice()
+                              ? 'Save file to phone storage / Documents'
+                              : 'Save file to local computer disk'
                         }
                       >
                         <HardDrive className="w-3.5 h-3.5" />
                         <span>
-                          {item.botChallengeTriggered ? 'Save Clip (127 KB)' : 'Save to PC'}
+                          {savingItemId === item.id
+                            ? 'Saving...'
+                            : item.botChallengeTriggered
+                              ? 'Save Clip'
+                              : isMobileDevice()
+                                ? 'Save to Mobile'
+                                : 'Save to PC'}
                         </span>
                       </button>
 

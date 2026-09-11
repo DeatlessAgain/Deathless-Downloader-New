@@ -340,28 +340,65 @@ export async function saveMediaBlobImproved(
   // 1. Check if running as native mobile app (Capacitor)
   if (Capacitor.isNativePlatform()) {
     try {
-      options.onProgress?.('Saving to mobile Documents storage...');
+      options.onProgress?.('Checking mobile storage permissions...');
+      try {
+        const permStatus = await Filesystem.checkPermissions();
+        if (permStatus.publicStorage !== 'granted') {
+          await Filesystem.requestPermissions();
+        }
+      } catch (permErr) {
+        console.warn('Filesystem permissions check warning:', permErr);
+      }
+
+      options.onProgress?.('Writing file to phone storage...');
       const base64Data = await blobToBase64Safe(blob);
 
-      const writeResult = await Filesystem.writeFile({
-        path: cleanName,
-        data: base64Data,
-        directory: Directory.Documents,
-        recursive: true,
-      });
+      let writeResult: any = null;
+      let targetDir = 'Documents';
+
+      // Try public Documents directory first
+      try {
+        writeResult = await Filesystem.writeFile({
+          path: cleanName,
+          data: base64Data,
+          directory: Directory.Documents,
+          recursive: true,
+        });
+        targetDir = 'Documents';
+      } catch (docErr) {
+        console.warn('Write to Documents directory failed, trying Data directory:', docErr);
+        try {
+          writeResult = await Filesystem.writeFile({
+            path: cleanName,
+            data: base64Data,
+            directory: Directory.Data,
+            recursive: true,
+          });
+          targetDir = 'App Storage';
+        } catch (dataErr) {
+          console.warn('Write to Data directory failed, trying Cache directory:', dataErr);
+          writeResult = await Filesystem.writeFile({
+            path: cleanName,
+            data: base64Data,
+            directory: Directory.Cache,
+            recursive: true,
+          });
+          targetDir = 'Cache';
+        }
+      }
 
       if (options.downloadId) {
         logStreamEvent(
           options.downloadId,
           'save',
-          `Saved to Android/iOS native filesystem at ${writeResult.uri}`
+          `Saved to Android/iOS native filesystem at ${writeResult?.uri || targetDir}`
         );
       }
 
       return {
         success: true,
         method: 'mobile_filesystem',
-        savedLocation: `Documents/${cleanName}`,
+        savedLocation: `${targetDir}/${cleanName}`,
         sizeBytes: blob.size,
         verifiedIntegrity,
         warnings: warnings.length ? warnings : undefined,

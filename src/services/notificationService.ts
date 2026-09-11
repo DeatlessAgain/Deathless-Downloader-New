@@ -143,3 +143,39 @@ export function sendDesktopNotification(
     return null;
   }
 }
+
+type ToastListener = (toast: ToastNotification) => void;
+const toastListeners = new Set<ToastListener>();
+
+export function showToast(
+  toast: Omit<ToastNotification, 'id' | 'timestamp'> & { id?: string }
+): ToastNotification {
+  const fullToast: ToastNotification = {
+    id: toast.id || 'toast_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+    timestamp: Date.now(),
+    title: toast.title,
+    fileName: toast.fileName,
+    format: toast.format,
+    sizeFormatted: toast.sizeFormatted,
+    thumbnail: toast.thumbnail,
+    type: toast.type || 'info',
+    downloadId: toast.downloadId,
+  };
+
+  toastListeners.forEach((fn) => {
+    try {
+      fn(fullToast);
+    } catch (e) {
+      console.error('Toast listener error:', e);
+    }
+  });
+
+  return fullToast;
+}
+
+export function subscribeToToasts(listener: ToastListener): () => void {
+  toastListeners.add(listener);
+  return () => {
+    toastListeners.delete(listener);
+  };
+}

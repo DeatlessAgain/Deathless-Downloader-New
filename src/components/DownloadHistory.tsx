@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { DownloadItem, MediaCategory, PlatformType } from '../types';
 import { triggerBrowserFileDownload } from '../services/downloadEngine';
+import { executeUniversalDownload, isMobileDevice } from '../services/mobileDownloadService';
 import { AccentColor, getAccentTheme } from '../services/accentTheme';
 
 interface DownloadHistoryProps {
@@ -63,6 +64,7 @@ export const DownloadHistory: React.FC<DownloadHistoryProps> = ({
 
   const [copiedLinkMap, setCopiedLinkMap] = useState<Record<string, boolean>>({});
   const [copiedPathMap, setCopiedPathMap] = useState<Record<string, boolean>>({});
+  const [savingItemId, setSavingItemId] = useState<string | null>(null);
 
   const now = Date.now();
   const oneDay = 24 * 60 * 60 * 1000;
@@ -400,16 +402,32 @@ export const DownloadHistory: React.FC<DownloadHistoryProps> = ({
                     <button
                       type="button"
                       id={`save-history-btn-${item.id}`}
-                      onClick={() => triggerBrowserFileDownload(item)}
+                      disabled={savingItemId === item.id}
+                      onClick={async () => {
+                        setSavingItemId(item.id);
+                        try {
+                          await executeUniversalDownload(item);
+                        } finally {
+                          setTimeout(() => setSavingItemId(null), 2500);
+                        }
+                      }}
                       className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
-                        darkMode
-                          ? 'bg-zinc-800 border-zinc-700 text-zinc-200 hover:bg-zinc-700'
-                          : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
+                        savingItemId === item.id
+                          ? 'bg-emerald-600 text-white border-emerald-600 animate-pulse'
+                          : darkMode
+                            ? 'bg-zinc-800 border-zinc-700 text-zinc-200 hover:bg-zinc-700'
+                            : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
                       }`}
-                      title="Save to computer disk"
+                      title={isMobileDevice() ? 'Save to phone storage / Documents' : 'Save to computer disk'}
                     >
                       <Download className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Save</span>
+                      <span>
+                        {savingItemId === item.id
+                          ? 'Saving...'
+                          : isMobileDevice()
+                            ? 'Save to Mobile'
+                            : 'Save to PC'}
+                      </span>
                     </button>
 
                     {/* Convert / Transcode */}

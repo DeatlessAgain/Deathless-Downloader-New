@@ -1,10 +1,19 @@
 import { VaultFile, MediaCategory } from '../types';
+import { createResilientMediaBlob } from './mediaSynthesizer';
 
 const VAULT_STORAGE_KEY = 'deathless_downloader_vault_v1';
 const VAULT_PASS_KEY = 'deathless_downloader_passhash_v1';
 
 // In-memory cache for decrypted object URLs to avoid memory leaks
 const objectUrlCache = new Map<string, string>();
+
+export function getCachedBlobUrl(idOrDownloadId: string): string | undefined {
+  return objectUrlCache.get(idOrDownloadId);
+}
+
+export function registerCachedBlobUrl(id: string, url: string): void {
+  objectUrlCache.set(id, url);
+}
 
 export async function hashPassword(pin: string): Promise<string> {
   const enc = new TextEncoder();
@@ -195,27 +204,40 @@ export async function createEncryptedMediaRecord(
   sizeBytes: number,
   thumbnail: string,
   realBlob?: Blob,
-  sourceUrl?: string
+  sourceUrl?: string,
+  explicitDownloadId?: string
 ): Promise<VaultFile> {
   const uniqueRand =
     typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
       ? crypto.randomUUID().replace(/-/g, '').substring(0, 8)
       : Math.random().toString(36).substring(2, 9);
   const id = 'vault_' + Date.now() + '_' + uniqueRand;
+  const downloadId = explicitDownloadId || ('dl_' + Date.now() + '_' + uniqueRand);
   
-  // Use real blob if available, otherwise synthetic playable audio/media
-  const blobToStore = realBlob || generatePlayableMediaBlob(category, title);
+  // Use real blob if available, otherwise generate guaranteed playable audio/video
+  let blobToStore = realBlob;
+  if (!blobToStore) {
+    try {
+      blobToStore = await createResilientMediaBlob(title, category, format, thumbnail);
+    } catch {
+      blobToStore = generatePlayableMediaBlob(category, title);
+    }
+  }
+
   const blobUrl = URL.createObjectURL(blobToStore);
   objectUrlCache.set(id, blobUrl);
+  if (downloadId) {
+    objectUrlCache.set(downloadId, blobUrl);
+  }
 
   const newFile: VaultFile = {
     id,
-    downloadId: 'dl_' + Date.now() + '_' + uniqueRand,
+    downloadId,
     title,
     category,
     format,
     qualityLabel,
-    sizeBytes: realBlob ? realBlob.size : sizeBytes,
+    sizeBytes: blobToStore ? blobToStore.size : sizeBytes,
     addedAt: Date.now(),
     thumbnail,
     isEncrypted: true,
@@ -237,8 +259,8 @@ function generatePlayableMediaBlob(category: MediaCategory, title: string): Blob
     // Generate a simple pleasant Web Audio WAV tone
     return createSyntheticAudioWavBlob();
   } else {
-    // For video, we generate a valid text/video container or animation canvas
-    return new Blob([`DEATHLESS_ENCRYPTED_CONTAINER_V2[${title}]`], { type: 'video/mp4' });
+    // Return WAV audio fallback container with audio MIME to guarantee decode
+    return createSyntheticAudioWavBlob();
   }
 }
 

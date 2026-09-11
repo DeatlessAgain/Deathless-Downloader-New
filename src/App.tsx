@@ -26,9 +26,10 @@ import {
 } from './services/downloadEngine';
 import { executeUniversalDownload, isMobileApp } from './services/mobileDownloadService';
 import { createResilientMediaBlob } from './services/mediaSynthesizer';
-import { createEncryptedMediaRecord } from './services/cryptoVault';
-import { playCompletionChime, sendDesktopNotification } from './services/notificationService';
+import { createEncryptedMediaRecord, registerCachedBlobUrl } from './services/cryptoVault';
+import { playCompletionChime, sendDesktopNotification, subscribeToToasts, ToastNotification } from './services/notificationService';
 import { applyAccentToDocument } from './services/accentTheme';
+import { X, CheckCircle, AlertCircle, Info } from 'lucide-react';
 
 import { Header } from './components/Header';
 import { UrlInputBar } from './components/UrlInputBar';
@@ -40,6 +41,7 @@ import { OfflineVault } from './components/OfflineVault';
 import { DownloadHistory } from './components/DownloadHistory';
 import { SettingsModal } from './components/SettingsModal';
 import { StreamDebuggerModal } from './components/StreamDebuggerModal';
+import { OfflineMediaPlayerModal } from './components/OfflineMediaPlayerModal';
 
 export default function App() {
   // Dark mode defaults to OFF (Light mode) as requested by user
@@ -63,11 +65,23 @@ export default function App() {
   const [pendingMediaInfo, setPendingMediaInfo] = useState<ExtractedMediaInfo | null>(null);
   const [isQualityModalOpen, setIsQualityModalOpen] = useState(false);
 
-  // Active item to play in vault
+  // Active item to play in vault or dedicated offline player modal
   const [vaultFileToPlay, setVaultFileToPlay] = useState<string | null>(null);
+  const [mediaPlayerItem, setMediaPlayerItem] = useState<DownloadItem | null>(null);
+  const [toasts, setToasts] = useState<ToastNotification[]>([]);
 
   // Aggregate Speed
   const [totalSpeedMbps, setTotalSpeedMbps] = useState(0);
+
+  // Subscribe to background toast notifications (file saves, permissions, etc.)
+  useEffect(() => {
+    return subscribeToToasts((toast) => {
+      setToasts((prev) => [toast, ...prev.slice(0, 3)]);
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== toast.id));
+      }, 5000);
+    });
+  }, []);
 
   // Save dark mode preference
   useEffect(() => {
@@ -132,17 +146,21 @@ export default function App() {
       sendDesktopNotification(completedItem.title, completedItem.fileName);
     }
 
-    if (completedItem.isEncrypted) {
-      createEncryptedMediaRecord(
-        completedItem.title,
-        completedItem.category,
-        completedItem.format,
-        completedItem.quality.label,
-        completedItem.totalBytes,
-        completedItem.thumbnail,
-        realBlob,
-        completedItem.originalUrl
-      ).catch((err) => console.error('Failed to vault:', err));
+    // Register media in offline crypto vault & blob cache for immediate offline playback
+    createEncryptedMediaRecord(
+      completedItem.title,
+      completedItem.category,
+      completedItem.format,
+      completedItem.quality.label,
+      completedItem.totalBytes,
+      completedItem.thumbnail,
+      realBlob,
+      completedItem.originalUrl,
+      completedItem.id
+    ).catch((err) => console.error('Failed to vault:', err));
+
+    if (completedItem.mediaBlobUrl) {
+      registerCachedBlobUrl(completedItem.id, completedItem.mediaBlobUrl);
     }
 
     executeUniversalDownload(completedItem, realBlob);
@@ -438,10 +456,15 @@ export default function App() {
     setCurrentTab('downloader');
   };
 
-  // Open in Vault
+  // Open in Vault or instant modal player
   const handleOpenInVault = (downloadId: string) => {
-    setVaultFileToPlay(downloadId);
-    setCurrentTab('vault');
+    const item = activeItems.find((i) => i.id === downloadId) || history.find((i) => i.id === downloadId);
+    if (item) {
+      setMediaPlayerItem(item);
+    } else {
+      setVaultFileToPlay(downloadId);
+      setCurrentTab('vault');
+    }
   };
 
   // Clear history
@@ -623,6 +646,49 @@ export default function App() {
           setIsSettingsOpen(true);
         }}
       />
+
+      {/* Instant Offline Media Player Modal */}
+      {mediaPlayerItem && (
+        <OfflineMediaPlayerModal
+          item={mediaPlayerItem}
+          onClose={() => setMediaPlayerItem(null)}
+          darkMode={darkMode}
+          accentColor={settings.accentColor}
+        />
+      )}
+
+      {/* In-app Toast Banner for Save & Playback Notifications */}
+      {toasts.length > 0 && (
+        <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+          {toasts.map((toast) => (
+            <div
+              key={toast.id}
+              className={`pointer-events-auto flex items-start gap-2.5 p-3.5 rounded-xl shadow-xl border backdrop-blur-md transition-all animate-in slide-in-from-bottom-2 ${
+                toast.type === 'success'
+                  ? 'bg-emerald-950/90 text-emerald-100 border-emerald-500/30'
+                  : toast.type === 'error'
+                    ? 'bg-rose-950/90 text-rose-100 border-rose-500/30'
+                    : 'bg-zinc-900/90 text-zinc-100 border-zinc-700'
+              }`}
+            >
+              {toast.type === 'success' ? (
+                <CheckCircle className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+              ) : toast.type === 'error' ? (
+                <AlertCircle className="w-4 h-4 text-rose-400 mt-0.5 flex-shrink-0" />
+              ) : (
+                <Info className="w-4 h-4 text-cyan-400 mt-0.5 flex-shrink-0" />
+              )}
+              <div className="flex-1 text-xs leading-relaxed">{toast.message}</div>
+              <button
+                onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+                className="opacity-70 hover:opacity-100 p-0.5 ml-1 text-slate-400 hover:text-white"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

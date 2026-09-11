@@ -224,7 +224,7 @@ export async function generateValidVideoBlob(
  */
 export async function createResilientMediaBlob(
   title: string,
-  category: 'video' | 'audio' | 'document' | 'other',
+  category: string,
   format: string,
   thumbnail?: string
 ): Promise<Blob> {

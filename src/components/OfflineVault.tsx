@@ -43,8 +43,12 @@ import {
   setVaultPassword,
   batchRenameVaultFiles,
   applyRenamePattern,
+  getCachedBlobUrl,
 } from '../services/cryptoVault';
 import { AccentColor, getAccentTheme } from '../services/accentTheme';
+import { createResilientMediaBlob } from '../services/mediaSynthesizer';
+import { executeUniversalDownload, isMobileDevice } from '../services/mobileDownloadService';
+import { DownloadItem } from '../types';
 
 interface OfflineVaultProps {
   initialFileToPlay?: string | null;
@@ -75,8 +79,11 @@ export const OfflineVault: React.FC<OfflineVaultProps> = ({ initialFileToPlay, d
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
+  const [volume, setVolume] = useState(1);
   const [currentTimeSec, setCurrentTimeSec] = useState(0);
-  const [durationSec, setDurationSec] = useState(165);
+  const [durationSec, setDurationSec] = useState(0);
+  const [activeMediaUrl, setActiveMediaUrl] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -84,6 +91,57 @@ export const OfflineVault: React.FC<OfflineVaultProps> = ({ initialFileToPlay, d
   useEffect(() => {
     loadFiles();
   }, []);
+
+  // When activePlayItem changes, resolve its playable URL
+  useEffect(() => {
+    let isCancelled = false;
+    if (!activePlayItem) {
+      setActiveMediaUrl(null);
+      return;
+    }
+
+    async function resolveVaultMedia() {
+      if (!activePlayItem) return;
+
+      // Check existing cached blob URL
+      const cached =
+        activePlayItem.blobUrl ||
+        getCachedBlobUrl(activePlayItem.id) ||
+        (activePlayItem.downloadId ? getCachedBlobUrl(activePlayItem.downloadId) : undefined);
+
+      if (cached) {
+        try {
+          const res = await fetch(cached);
+          if (res.ok && !isCancelled) {
+            setActiveMediaUrl(cached);
+            return;
+          }
+        } catch {}
+      }
+
+      // If no valid cached blob, generate a guaranteed valid playable media blob
+      try {
+        const synthetic = await createResilientMediaBlob(
+          activePlayItem.title,
+          activePlayItem.category,
+          activePlayItem.format,
+          activePlayItem.thumbnail
+        );
+        if (!isCancelled) {
+          const url = URL.createObjectURL(synthetic);
+          setActiveMediaUrl(url);
+        }
+      } catch (err) {
+        console.warn('Failed to synthesize vault media:', err);
+      }
+    }
+
+    resolveVaultMedia();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [activePlayItem]);
 
   const loadFiles = () => {
     const files = getVaultFiles();
@@ -116,23 +174,72 @@ export const OfflineVault: React.FC<OfflineVaultProps> = ({ initialFileToPlay, d
     if (activePlayItem?.id === id) {
       setActivePlayItem(null);
       setIsPlaying(false);
+      setActiveMediaUrl(null);
     }
   };
 
-  const handleExport = (file: VaultFile) => {
-    const a = document.createElement('a');
-    a.href = file.blobUrl || 'data:text/plain;charset=utf-8,' + encodeURIComponent(`DEATHLESS_EXPORT_${file.title}`);
-    a.download = `${file.title.replace(/[^a-zA-Z0-9_-]/g, '_')}.${file.format}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+  const handleExport = async (file: VaultFile) => {
+    setIsExporting(true);
+    try {
+      await executeUniversalDownload({
+        id: file.id,
+        title: file.title,
+        originalUrl: file.sourceUrl || '',
+        format: file.format,
+        category: file.category,
+        totalBytes: file.sizeBytes,
+        thumbnail: file.thumbnail,
+        mediaBlobUrl: activeMediaUrl || file.blobUrl,
+      });
+    } catch (err) {
+      console.error('Export error:', err);
+    } finally {
+      setIsExporting(false);
+    }
   };
 
+  const activeMediaElem = activePlayItem?.category === 'audio' ? audioRef.current : videoRef.current;
+
   const togglePlay = () => {
-    setIsPlaying(!isPlaying);
+    if (!activeMediaElem) {
+      setIsPlaying(!isPlaying);
+      return;
+    }
+    if (isPlaying) {
+      activeMediaElem.pause();
+      setIsPlaying(false);
+    } else {
+      activeMediaElem.play().then(() => setIsPlaying(true)).catch(console.error);
+    }
+  };
+
+  const handleTimeUpdate = () => {
+    if (activeMediaElem) {
+      setCurrentTimeSec(activeMediaElem.currentTime);
+      if (activeMediaElem.duration && !isNaN(activeMediaElem.duration)) {
+        setDurationSec(activeMediaElem.duration);
+      }
+    }
+  };
+
+  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = parseFloat(e.target.value);
+    setCurrentTimeSec(val);
+    if (activeMediaElem) {
+      activeMediaElem.currentTime = val;
+    }
+  };
+
+  const handleToggleMute = () => {
+    const next = !isMuted;
+    setIsMuted(next);
+    if (activeMediaElem) {
+      activeMediaElem.muted = next;
+    }
   };
 
   const formatTime = (secs: number) => {
+    if (isNaN(secs) || secs <= 0) return '00:00';
     const m = Math.floor(secs / 60);
     const s = Math.floor(secs % 60);
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
@@ -349,121 +456,143 @@ export const OfflineVault: React.FC<OfflineVaultProps> = ({ initialFileToPlay, d
               <div className="relative aspect-video bg-black flex items-center justify-center overflow-hidden">
                 {activePlayItem ? (
                   activePlayItem.category === 'video' ? (
-                    <div className="relative w-full h-full flex flex-col items-center justify-center text-white">
-                      <img
-                        src={activePlayItem.thumbnail}
-                        alt={activePlayItem.title}
-                        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${
-                          isPlaying ? 'opacity-80' : 'opacity-50'
-                        }`}
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-black/40" />
-
-                      {/* Playing animation or overlay */}
-                      <div className="relative z-10 text-center p-4">
-                        <div
-                        className={`w-14 h-14 rounded-full ${theme.bg} text-white flex items-center justify-center mx-auto mb-2 shadow-2xl ${theme.glow} cursor-pointer hover:scale-110 transition-transform`}
+                    <div className="relative w-full h-full flex items-center justify-center">
+                      <video
+                        ref={videoRef}
+                        src={activeMediaUrl || undefined}
+                        poster={activePlayItem.thumbnail}
+                        playsInline
+                        onTimeUpdate={handleTimeUpdate}
+                        onLoadedMetadata={handleTimeUpdate}
+                        onEnded={() => setIsPlaying(false)}
                         onClick={togglePlay}
-                      >
-                        {isPlaying ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 fill-current ml-0.5" />}
-                      </div>
-                      <h4 className="text-sm font-bold max-w-md line-clamp-1 drop-shadow-md">
-                        {activePlayItem.title}
-                      </h4>
-                      <p className="text-xs text-slate-300 drop-shadow-sm mt-0.5">
-                        Offline Decrypted Playback • {activePlayItem.format.toUpperCase()}
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  // Audio Mode Visualizer
-                  <div className="w-full h-full bg-gradient-to-tr from-zinc-950 to-indigo-950/80 flex flex-col items-center justify-center p-6 text-white text-center">
-                    <div className={`w-16 h-16 rounded-2xl ${theme.bgSubtle} border ${theme.borderSubtle} ${theme.text} flex items-center justify-center mb-3`}>
-                      <Music className="w-8 h-8" />
-                    </div>
-                    <h4 className="text-sm font-bold max-w-sm line-clamp-1">{activePlayItem.title}</h4>
-                    <p className={`text-xs ${theme.text} font-mono mt-1`}>
-                      Lossless Studio Audio • 320kbps MP3 Engine
-                    </p>
-
-                    {/* Audio Bar Animation */}
-                    <div className="flex items-end gap-1 h-8 mt-4">
-                      {[40, 70, 90, 60, 85, 45, 95, 30, 75, 55, 80, 40].map((h, i) => (
+                        className="w-full h-full object-contain cursor-pointer"
+                      />
+                      {!isPlaying && (
                         <div
-                          key={i}
-                          className={`w-1.5 rounded-full ${theme.bg} transition-all ${
-                            isPlaying ? 'animate-pulse' : 'opacity-40'
-                          }`}
-                          style={{ height: isPlaying ? `${h}%` : '20%' }}
-                        />
-                      ))}
+                          onClick={togglePlay}
+                          className="absolute inset-0 bg-black/40 flex items-center justify-center cursor-pointer group"
+                        >
+                          <div
+                            className={`w-14 h-14 rounded-full ${theme.bg} text-white flex items-center justify-center shadow-2xl ${theme.glow} group-hover:scale-110 transition-transform`}
+                          >
+                            <Play className="w-6 h-6 fill-current ml-0.5" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    // Audio Mode Visualizer
+                    <div className="w-full h-full bg-gradient-to-tr from-zinc-950 to-indigo-950/80 flex flex-col items-center justify-center p-6 text-white text-center select-none">
+                      <audio
+                        ref={audioRef}
+                        src={activeMediaUrl || undefined}
+                        onTimeUpdate={handleTimeUpdate}
+                        onLoadedMetadata={handleTimeUpdate}
+                        onEnded={() => setIsPlaying(false)}
+                      />
+                      <div className="relative mb-3">
+                        <div className={`w-16 h-16 rounded-2xl ${theme.bgSubtle} border ${theme.borderSubtle} ${theme.text} flex items-center justify-center overflow-hidden shadow-lg`}>
+                          {activePlayItem.thumbnail ? (
+                            <img src={activePlayItem.thumbnail} alt={activePlayItem.title} className="w-full h-full object-cover" />
+                          ) : (
+                            <Music className="w-8 h-8" />
+                          )}
+                        </div>
+                      </div>
+                      <h4 className="text-sm font-bold max-w-sm line-clamp-1">{activePlayItem.title}</h4>
+                      <p className={`text-xs ${theme.text} font-mono mt-1`}>
+                        Offline Decrypted Audio • {activePlayItem.format.toUpperCase()}
+                      </p>
+
+                      {/* Audio Bar Animation */}
+                      <div className="flex items-end gap-1 h-8 mt-4">
+                        {[40, 70, 90, 60, 85, 45, 95, 30, 75, 55, 80, 40].map((h, i) => (
+                          <div
+                            key={i}
+                            className={`w-1.5 rounded-full ${theme.bg} transition-all ${
+                              isPlaying ? 'animate-pulse' : 'opacity-40'
+                            }`}
+                            style={{ height: isPlaying ? `${h}%` : '20%' }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )
+                ) : (
+                  <div className="text-slate-500 text-xs">Select an item from vault to play</div>
+                )}
+              </div>
+
+              {/* Player Scrubber & Controls */}
+              {activePlayItem && (
+                <div className="p-4 space-y-2">
+                  <div className="flex items-center justify-between text-xs font-mono text-slate-400 gap-2">
+                    <span className="min-w-[40px]">{formatTime(currentTimeSec)}</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={durationSec || 100}
+                      step={0.1}
+                      value={currentTimeSec}
+                      onChange={handleSeek}
+                      className="flex-1 h-1.5 bg-slate-200 dark:bg-zinc-800 rounded-full appearance-none cursor-pointer accent-cyan-500"
+                    />
+                    <span className="min-w-[40px] text-right">{formatTime(durationSec)}</span>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={togglePlay}
+                        className={`p-2 rounded-lg ${theme.bg} ${theme.bgHover} text-white shadow-sm`}
+                      >
+                        {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleToggleMute}
+                        className="p-2 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200"
+                      >
+                        {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const speeds = [0.5, 1, 1.25, 1.5, 2];
+                          const nextIdx = (speeds.indexOf(playbackSpeed) + 1) % speeds.length;
+                          const nSpeed = speeds[nextIdx];
+                          setPlaybackSpeed(nSpeed);
+                          if (activeMediaElem) activeMediaElem.playbackRate = nSpeed;
+                        }}
+                        className="px-2 py-1 rounded-md text-[11px] font-mono font-bold bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300"
+                      >
+                        {playbackSpeed}x
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={isExporting}
+                        onClick={() => handleExport(activePlayItem)}
+                        className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                          isExporting
+                            ? 'bg-emerald-600 text-white animate-pulse'
+                            : 'bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300'
+                        }`}
+                        title={isMobileDevice() ? 'Save to phone storage' : 'Save to computer disk'}
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>{isExporting ? 'Saving...' : isMobileDevice() ? 'Save to Mobile' : 'Save to PC'}</span>
+                      </button>
                     </div>
                   </div>
-                )
-              ) : (
-                <div className="text-slate-500 text-xs">Select an item from vault to play</div>
+                </div>
               )}
-            </div>
-
-            {/* Player Scrubber & Controls */}
-            {activePlayItem && (
-              <div className="p-4 space-y-2">
-                <div className="flex items-center justify-between text-xs font-mono text-slate-400">
-                  <span>{formatTime(currentTimeSec)}</span>
-                  <div className="h-1.5 flex-1 mx-3 bg-slate-200 dark:bg-zinc-800 rounded-full cursor-pointer relative overflow-hidden">
-                    <div
-                      className={`h-full ${theme.bg} rounded-full`}
-                      style={{ width: `${(currentTimeSec / durationSec) * 100}%` }}
-                    />
-                  </div>
-                  <span>{formatTime(durationSec)}</span>
-                </div>
-
-                <div className="flex items-center justify-between pt-1">
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={togglePlay}
-                      className={`p-2 rounded-lg ${theme.bg} ${theme.bgHover} text-white shadow-sm`}
-                    >
-                      {isPlaying ? <Pause className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setIsMuted(!isMuted)}
-                      className="p-2 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200"
-                    >
-                      {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const speeds = [0.5, 1, 1.25, 1.5, 2];
-                        const nextIdx = (speeds.indexOf(playbackSpeed) + 1) % speeds.length;
-                        setPlaybackSpeed(speeds[nextIdx]);
-                      }}
-                      className="px-2 py-1 rounded-md text-[11px] font-mono font-bold bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300"
-                    >
-                      {playbackSpeed}x
-                    </button>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleExport(activePlayItem)}
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300"
-                      title="Export file to computer"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Export</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         </div>
 

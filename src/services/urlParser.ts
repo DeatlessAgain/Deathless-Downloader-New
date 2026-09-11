@@ -1,8 +1,28 @@
 import { ExtractedMediaInfo, PlatformType, QualityOption, CdnMetadata } from '../types';
 import { getApiUrl } from './apiConfig';
 
+export function normalizeUrl(raw: string): string {
+  if (!raw || typeof raw !== 'string') return '';
+  let clean = raw.trim();
+  if (!clean) return '';
+  if (!/^https?:\/\//i.test(clean)) {
+    clean = `https://${clean}`;
+  }
+  return clean;
+}
+
+export function isRootDomain(urlStr: string): boolean {
+  try {
+    const parsed = new URL(normalizeUrl(urlStr));
+    const pathname = parsed.pathname.replace(/\/+$/, '');
+    return pathname === '' && !parsed.search;
+  } catch {
+    return false;
+  }
+}
+
 export function detectPlatform(url: string): PlatformType {
-  const lower = url.toLowerCase();
+  const lower = (url || '').toLowerCase();
   if (lower.includes('youtube.com') || lower.includes('youtu.be')) return 'youtube';
   if (lower.includes('tiktok.com')) return 'tiktok';
   if (lower.includes('facebook.com') || lower.includes('fb.watch')) return 'facebook';
@@ -193,7 +213,7 @@ export function generateStandardQualities(baseMb = 480): QualityOption[] {
 }
 
 export function inspectMediaUrl(rawUrl: string): ExtractedMediaInfo {
-  const url = rawUrl.trim();
+  const url = normalizeUrl(rawUrl);
   const platform = detectPlatform(url);
   const cdnInfo = detectCdnMetadata(url, platform);
   const isPlaylist = url.includes('list=') || url.includes('playlist') || url.includes('album');
@@ -280,6 +300,9 @@ export function inspectMediaUrl(rawUrl: string): ExtractedMediaInfo {
 
 // Direct client-side metadata fetcher for YouTube, TikTok, Twitter, Reddit
 async function fetchClientMetadataFallback(url: string, platform: PlatformType): Promise<Partial<ExtractedMediaInfo> | null> {
+  if (isRootDomain(url)) {
+    return null;
+  }
   try {
     if (platform === 'youtube') {
       const oembedRes = await fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`);
@@ -331,13 +354,13 @@ async function fetchClientMetadataFallback(url: string, platform: PlatformType):
       }
     }
   } catch (err) {
-    console.warn('Direct client metadata fetch failed:', err);
+    // Non-fatal client fallback error
   }
   return null;
 }
 
 export async function inspectMediaUrlAsync(rawUrl: string): Promise<ExtractedMediaInfo> {
-  const clean = rawUrl.trim();
+  const clean = normalizeUrl(rawUrl);
 
   // 1. Call Backend API (/api/inspect) via dynamic getApiUrl (resolves to Cloud Run backend in APK)
   try {
