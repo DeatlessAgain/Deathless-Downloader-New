@@ -25,6 +25,12 @@ export interface QualityOption {
   formatId?: string;
   directUrl?: string;
   directStreamUrl?: string;
+  conversion?: {
+    sourceFormat: string;
+    targetFormat: string;
+    isAudioOnly: boolean;
+    enabled: boolean;
+  };
 }
 
 export interface ChunkProgress {
@@ -99,6 +105,12 @@ export interface DownloadItem {
   webPlayerUrl?: string;
   alternateStreams?: AlternateStreamOption[];
   manualDownloadMirrors?: ManualDownloadMirror[];
+  conversion?: {
+    sourceFormat: string;
+    targetFormat: string;
+    isAudioOnly: boolean;
+    enabled: boolean;
+  };
 }
 
 export interface BatchItem {
@@ -243,7 +255,7 @@ export interface StreamSessionDebug {
   blobInfo?: {
     sizeBytes: number;
     mimeType: string;
-    saveMethodUsed: 'file_system_api' | 'mobile_filesystem' | 'browser_blob_url' | 'direct_stream';
+    saveMethodUsed: 'file_system_api' | 'mobile_filesystem' | 'browser_blob_url' | 'direct_stream' | 'mobile_share_api';
     savedLocation?: string;
     verifiedIntegrity: boolean;
   };
@@ -252,7 +264,7 @@ export interface StreamSessionDebug {
 
 export interface SaveResult {
   success: boolean;
-  method: 'file_system_api' | 'mobile_filesystem' | 'browser_blob_url' | 'direct_stream';
+  method: 'file_system_api' | 'mobile_filesystem' | 'browser_blob_url' | 'direct_stream' | 'mobile_share_api';
   savedLocation: string;
   sizeBytes: number;
   verifiedIntegrity: boolean;

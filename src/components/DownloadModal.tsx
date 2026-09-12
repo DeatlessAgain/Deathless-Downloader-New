@@ -15,6 +15,8 @@ import {
   Terminal,
   Activity,
   AlertTriangle,
+  Repeat,
+  Sparkles,
 } from 'lucide-react';
 import { ExtractedMediaInfo, QualityOption, StreamHeaderInfo } from '../types';
 import { loadSettings } from '../services/downloadEngine';
@@ -57,6 +59,11 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
   const [audioQuality, setAudioQuality] = useState<AudioQualityType>(
     (settings.defaultAudioQuality as AudioQualityType) || '320k'
   );
+
+  // Conversion Selection Step (Media Synthesizer)
+  type TargetConversionFormat = 'mp3' | 'mp4' | 'webm' | 'mkv' | 'wav' | 'flac' | 'm4a';
+  const [enableConversion, setEnableConversion] = useState<boolean>(false);
+  const [targetFormat, setTargetFormat] = useState<TargetConversionFormat>('mp3');
 
   const [encryptInVault, setEncryptInVault] = useState(settings.saveToEncryptedVault);
   const [copiedUrl, setCopiedUrl] = useState(false);
@@ -177,31 +184,52 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
   const currentVideoSpec = videoSpecs[videoQuality];
   const currentAudioSpec = audioSpecs[audioQuality];
 
-  const constructedQuality: QualityOption =
-    downloadMode === 'video'
+  const sourceFormat = downloadMode === 'video' ? videoFormat : audioFormat;
+  const isTargetAudio = ['mp3', 'm4a', 'wav', 'flac'].includes(targetFormat);
+  const effectiveFormat = enableConversion ? (targetFormat as any) : (downloadMode === 'video' ? videoFormat : audioFormat);
+  const effectiveIsAudioOnly = enableConversion ? isTargetAudio : downloadMode === 'audio';
+
+  const constructedQuality: QualityOption = {
+    id: enableConversion
+      ? `convert-${sourceFormat}-to-${targetFormat}-${videoQuality || audioQuality}`
+      : downloadMode === 'video'
+        ? `custom-video-${videoQuality}-${videoFormat}`
+        : `custom-audio-${audioQuality}-${audioFormat}`,
+    label: enableConversion
+      ? `${downloadMode === 'video' ? currentVideoSpec.label : currentAudioSpec.label} ➔ Converted to .${targetFormat.toUpperCase()} (Synthesizer)`
+      : downloadMode === 'video'
+        ? `${currentVideoSpec.label} [${videoFormat.toUpperCase()}]`
+        : `${currentAudioSpec.label} [${audioFormat.toUpperCase()}]`,
+    resolution: downloadMode === 'video' && !isTargetAudio ? currentVideoSpec.res : (currentAudioSpec?.sampleRate || 'Audio Master'),
+    qualityTag: downloadMode === 'video' ? videoQuality : audioQuality,
+    format: effectiveFormat,
+    formatId: effectiveIsAudioOnly
+      ? 'ba/b[ext=m4a]/251/140/bestaudio/best'
+      : downloadMode === 'video'
+        ? videoQuality === '4k'
+          ? 'bestvideo[height<=2160]+bestaudio/best'
+          : videoQuality === '2k'
+            ? 'bestvideo[height<=1440]+bestaudio/best'
+            : `bestvideo[height<=${videoQuality.replace(/[^0-9]/g, '') || '1080'}]+bestaudio/best`
+        : 'ba/bestaudio',
+    isAudioOnly: effectiveIsAudioOnly,
+    bitrateKbps: downloadMode === 'video' ? currentVideoSpec.bitrate : currentAudioSpec.bitrate,
+    fps: downloadMode === 'video' && !isTargetAudio ? currentVideoSpec.fps : undefined,
+    codec: enableConversion
+      ? `Media Synthesizer (${sourceFormat.toUpperCase()} ➔ ${targetFormat.toUpperCase()})`
+      : downloadMode === 'video'
+        ? `${currentVideoSpec.codec} in .${videoFormat}`
+        : `${currentAudioSpec.codec} in .${audioFormat}`,
+    approxSizeMb: enableConversion && isTargetAudio ? 12 : downloadMode === 'video' ? currentVideoSpec.baseMb : currentAudioSpec.baseMb,
+    conversion: enableConversion
       ? {
-          id: `custom-video-${videoQuality}-${videoFormat}`,
-          label: `${currentVideoSpec.label} [${videoFormat.toUpperCase()}]`,
-          resolution: currentVideoSpec.res,
-          qualityTag: videoQuality,
-          format: videoFormat,
-          isAudioOnly: false,
-          bitrateKbps: currentVideoSpec.bitrate,
-          fps: currentVideoSpec.fps,
-          codec: `${currentVideoSpec.codec} in .${videoFormat}`,
-          approxSizeMb: currentVideoSpec.baseMb,
+          sourceFormat,
+          targetFormat,
+          isAudioOnly: isTargetAudio,
+          enabled: true,
         }
-      : {
-          id: `custom-audio-${audioQuality}-${audioFormat}`,
-          label: `${currentAudioSpec.label} [${audioFormat.toUpperCase()}]`,
-          resolution: currentAudioSpec.sampleRate,
-          qualityTag: audioQuality,
-          format: audioFormat,
-          isAudioOnly: true,
-          bitrateKbps: currentAudioSpec.bitrate,
-          codec: `${currentAudioSpec.codec} in .${audioFormat}`,
-          approxSizeMb: currentAudioSpec.baseMb,
-        };
+      : undefined,
+  };
 
   // Preview generated filename
   const cleanTitle = info.title
@@ -518,6 +546,150 @@ export const DownloadModal: React.FC<DownloadModalProps> = ({
               </div>
             </div>
           )}
+
+          {/* Format Conversion Step (Media Synthesizer) */}
+          <div
+            id="media-synthesizer-conversion-step"
+            className={`p-4 rounded-2xl border transition-all ${
+              enableConversion
+                ? darkMode
+                  ? 'bg-cyan-950/20 border-cyan-500/50 shadow-md shadow-cyan-950/30'
+                  : 'bg-cyan-50/60 border-cyan-300 shadow-sm'
+                : darkMode
+                  ? 'bg-zinc-950/40 border-zinc-800'
+                  : 'bg-slate-50/70 border-slate-200'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div
+                  className={`w-8 h-8 rounded-xl flex items-center justify-center ${
+                    enableConversion ? 'bg-cyan-500 text-white' : 'bg-slate-200 dark:bg-zinc-800 text-slate-500'
+                  }`}
+                >
+                  <Repeat className={`w-4 h-4 ${enableConversion ? 'animate-pulse' : ''}`} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-zinc-200">
+                      Format Conversion (Media Synthesizer)
+                    </span>
+                    <span className="text-[10px] px-2 py-0.2 rounded-full font-bold bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20">
+                      Client Transcoder
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                    Convert media format on-the-fly before saving to device storage or vault
+                  </p>
+                </div>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  id="toggle-media-conversion"
+                  checked={enableConversion}
+                  onChange={(e) => setEnableConversion(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-10 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-zinc-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-cyan-600"></div>
+              </label>
+            </div>
+
+            {enableConversion && (
+              <div className="mt-3.5 pt-3 border-t border-slate-200/80 dark:border-zinc-800 space-y-3 animate-fadeIn">
+                {/* Quick presets */}
+                <div>
+                  <span className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400 block mb-1.5">
+                    Quick Conversion Recipes:
+                  </span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {[
+                      { label: 'MP4 ➔ MP3 Audio', src: 'video', srcFmt: 'mp4', tgt: 'mp3' },
+                      { label: 'WebM ➔ MP4 Video', src: 'video', srcFmt: 'webm', tgt: 'mp4' },
+                      { label: 'MP4 ➔ WebM Video', src: 'video', srcFmt: 'mp4', tgt: 'webm' },
+                      { label: 'Video ➔ WAV Lossless', src: 'video', srcFmt: 'mp4', tgt: 'wav' },
+                      { label: 'MKV ➔ MP4 Mobile', src: 'video', srcFmt: 'mkv', tgt: 'mp4' },
+                    ].map((preset) => (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        onClick={() => {
+                          setDownloadMode(preset.src as any);
+                          if (preset.src === 'video') setVideoFormat(preset.srcFmt as any);
+                          setTargetFormat(preset.tgt as any);
+                        }}
+                        className={`px-2 py-1 rounded-lg text-[11px] font-medium transition-all ${
+                          targetFormat === preset.tgt && (preset.src === 'video' ? videoFormat === preset.srcFmt : true)
+                            ? 'bg-cyan-600 text-white shadow-sm font-semibold'
+                            : darkMode
+                              ? 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                              : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Target Format Picker */}
+                <div>
+                  <span className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400 block mb-1.5">
+                    Pick Target Format:
+                  </span>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {(['mp4', 'webm', 'mkv', 'mp3', 'm4a', 'wav', 'flac'] as TargetConversionFormat[]).map((fmt) => {
+                      const isSelected = targetFormat === fmt;
+                      const isAudio = ['mp3', 'm4a', 'wav', 'flac'].includes(fmt);
+                      return (
+                        <button
+                          key={fmt}
+                          type="button"
+                          id={`target-conversion-format-${fmt}`}
+                          onClick={() => setTargetFormat(fmt)}
+                          className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-between ${
+                            isSelected
+                              ? 'bg-cyan-600 text-white border-cyan-600 shadow-sm'
+                              : darkMode
+                                ? 'bg-zinc-900 border-zinc-800 text-zinc-300 hover:border-zinc-700'
+                                : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5">
+                            {isAudio ? <Music className="w-3.5 h-3.5" /> : <Film className="w-3.5 h-3.5" />}
+                            <span>.{fmt.toUpperCase()}</span>
+                          </div>
+                          <span className="text-[9px] opacity-75">{isAudio ? 'Audio' : 'Video'}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Visual Pipeline Banner */}
+                <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-mono font-bold text-slate-700 dark:text-zinc-200 uppercase">
+                      .{sourceFormat}
+                    </span>
+                    <span className="text-cyan-500 font-bold">➔</span>
+                    <div className="flex items-center gap-1 text-[11px] text-cyan-700 dark:text-cyan-300 bg-cyan-500/20 px-2 py-0.5 rounded-md font-semibold">
+                      <Sparkles className="w-3 h-3 text-cyan-500" />
+                      <span>Synthesizer Transcode</span>
+                    </div>
+                    <span className="text-cyan-500 font-bold">➔</span>
+                    <span className="font-mono font-black text-cyan-600 dark:text-cyan-400 uppercase">
+                      .{targetFormat}
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
+                    Guaranteed playable output
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Destination Path and File Details Preview */}
           <div className="p-3.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-950/40 space-y-2 text-xs">

@@ -32,6 +32,8 @@ import { executeUniversalDownload, isMobileDevice } from '../services/mobileDown
 import { AccentColor, getAccentTheme } from '../services/accentTheme';
 import { AlternativePlayerModal } from './AlternativePlayerModal';
 import { triggerDirectBrowserDownload } from '../services/clientMediaResolver';
+import { SpeedHistoryD3Chart } from './SpeedHistoryD3Chart';
+import { getApiUrl } from '../services/apiConfig';
 
 interface ActiveDownloadsProps {
   items: DownloadItem[];
@@ -422,6 +424,14 @@ export const ActiveDownloads: React.FC<ActiveDownloadsProps> = ({
         )}
       </div>
 
+      {/* Real-time D3 Line Chart Visualization */}
+      <SpeedHistoryD3Chart
+        items={items}
+        aggregateSpeedBytesPerSec={aggregateSpeedBytesPerSec}
+        darkMode={darkMode}
+        accentColor={accentColor}
+      />
+
       {/* Speed Throttle & Filter / Sort Toolbar */}
       <div
         className={`p-3.5 rounded-2xl border transition-all space-y-3 ${
@@ -699,6 +709,27 @@ export const ActiveDownloads: React.FC<ActiveDownloadsProps> = ({
                                 : 'Save to PC'}
                         </span>
                       </button>
+
+                      {item.originalUrl && (
+                        <a
+                          id={`direct-download-link-${item.id}`}
+                          href={getApiUrl(
+                            `/api/download?url=${encodeURIComponent(item.originalUrl)}&formatId=${encodeURIComponent(item.quality?.formatId || '')}&format=${encodeURIComponent(item.format)}&isAudioOnly=${item.quality?.isAudioOnly ?? (item.category === 'audio')}&title=${encodeURIComponent(item.title)}`
+                          )}
+                          download={item.fileName || `${item.title.substring(0, 30).replace(/[^a-zA-Z0-9_-]/g, '_')}.${item.format}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+                            darkMode
+                              ? 'bg-zinc-800 border-zinc-700 text-cyan-400 hover:bg-zinc-700'
+                              : 'bg-cyan-50 border-cyan-200 text-cyan-700 hover:bg-cyan-100'
+                          }`}
+                          title="Direct link for Android Download Manager or Browser download"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Direct Link</span>
+                        </a>
+                      )}
 
                       {onOpenInVault && (
                         <button

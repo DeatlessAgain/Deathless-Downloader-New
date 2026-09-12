@@ -2,6 +2,7 @@ import { DownloadItem, ChunkProgress, QualityOption, ExtractedMediaInfo } from '
 import { createEncryptedMediaRecord } from './cryptoVault';
 import { AccentColor } from './accentTheme';
 import { getApiUrl } from './apiConfig';
+import { showToast } from './notificationService';
 import {
   initStreamDebugSession,
   recordStreamHeaders,
@@ -232,6 +233,7 @@ export function createDownloadItem(
     webPlayerUrl: info.webPlayerUrl,
     alternateStreams: info.alternateStreams,
     manualDownloadMirrors: info.manualDownloadMirrors,
+    conversion: quality.conversion,
   };
 
   return item;
@@ -300,163 +302,300 @@ export function startRealDownloadStream(
   initStreamDebugSession(item.id, item.originalUrl, item.fileName, item.totalBytes);
   const streamStartTime = Date.now();
 
+  const MAX_RETRIES = 5;
+  const BASE_DELAY_MS = 1000;
+  const MAX_DELAY_MS = 30000;
+
   (async () => {
     try {
-      let activeFetchUrl = downloadUrl;
-      let usingClientDirect = false;
-
-      // If item has a direct media stream URL and engineMode is not explicitly forced to server_proxy,
-      // attempt client-side direct stream fetching from the user's residential IP
-      if (
-        item.directStreamUrl &&
-        item.directStreamUrl.startsWith('http') &&
-        item.engineMode !== 'server_proxy'
-      ) {
-        try {
-          logStreamEvent(item.id, 'info', `Attempting client-side residential stream: ${item.directStreamUrl.substring(0, 60)}...`);
-          const testRes = await fetch(item.directStreamUrl, {
-            signal: controller.signal,
-            headers: { Accept: '*/*' },
-          });
-          if (testRes.ok && testRes.body) {
-            activeFetchUrl = item.directStreamUrl;
-            usingClientDirect = true;
-            logStreamEvent(item.id, 'info', 'Client-side residential connection established successfully (bypassing bot blocks)');
-          }
-        } catch {
-          logStreamEvent(item.id, 'warn', 'Client direct stream CORS restricted, falling back to server stream');
-          activeFetchUrl = downloadUrl;
-        }
-      }
-
-      logStreamEvent(item.id, 'info', `Connecting to stream endpoint: ${activeFetchUrl}`);
-      const timeoutId = setTimeout(() => {
-        try {
-          controller.abort();
-        } catch {}
-      }, 7000);
-
-      let response: Response;
-      try {
-        response = await fetch(activeFetchUrl, { signal: controller.signal });
-      } finally {
-        clearTimeout(timeoutId);
-      }
-
-      if (!response.ok || !response.body) {
-        throw new Error(`Server returned HTTP ${response.status}`);
-      }
-
-      const allHeaders: Record<string, string> = {};
-      response.headers.forEach((val, key) => {
-        allHeaders[key.toLowerCase()] = val;
-      });
-
-      const isBotFallbackHeader =
-        response.headers.get('x-bot-blocked') === '1' ||
-        response.headers.get('x-fallback-stream') === '1';
-
-      const totalHeader = response.headers.get('content-length');
-      const totalBytes = totalHeader ? parseInt(totalHeader, 10) : item.totalBytes;
-
-      // Record headers in debugger
-      recordStreamHeaders(item.id, {
-        url: downloadUrl,
-        statusCode: response.status,
-        statusText: response.statusText || 'OK',
-        contentLength: totalBytes,
-        contentType: response.headers.get('content-type') || 'application/octet-stream',
-        contentDisposition: response.headers.get('content-disposition') || undefined,
-        acceptRanges: response.headers.get('accept-ranges') || undefined,
-        supportsResuming: (response.headers.get('accept-ranges') || '').toLowerCase().includes('bytes'),
-        isBotBlocked: isBotFallbackHeader,
-        isFallbackStream: isBotFallbackHeader,
-        server: response.headers.get('server') || undefined,
-        latencyMs: Date.now() - streamStartTime,
-        probedAt: Date.now(),
-        allHeaders,
-      });
-
-      const reader = response.body.getReader();
-      const collectedChunks: Uint8Array[] = [];
+      let collectedChunks: Uint8Array[] = [];
       let downloaded = 0;
       let lastTime = Date.now();
       let lastBytes = 0;
       let currentSpeed = 0;
+      let isBotFallbackHeader = false;
+      let totalBytes = item.totalBytes;
+      let attempt = 0;
 
-      while (!aborted) {
-        if (isPaused) {
-          await new Promise((r) => setTimeout(r, 200));
+    while (attempt <= MAX_RETRIES && !aborted) {
+      try {
+        let activeFetchUrl = downloadUrl;
+        let usingClientDirect = false;
+
+        // If item has a direct media stream URL and engineMode is not explicitly forced to server_proxy,
+        // attempt client-side direct stream fetching from the user's residential IP
+        if (
+          item.directStreamUrl &&
+          item.directStreamUrl.startsWith('http') &&
+          item.engineMode !== 'server_proxy'
+        ) {
+          try {
+            logStreamEvent(item.id, 'info', `Attempting client-side residential stream: ${item.directStreamUrl.substring(0, 60)}...`);
+            const testRes = await fetch(item.directStreamUrl, {
+              signal: controller.signal,
+              headers: { Accept: '*/*' },
+            });
+            if (testRes.ok && testRes.body) {
+              activeFetchUrl = item.directStreamUrl;
+              usingClientDirect = true;
+              logStreamEvent(item.id, 'info', 'Client-side residential connection established successfully (bypassing bot blocks)');
+            }
+          } catch {
+            logStreamEvent(item.id, 'warn', 'Client direct stream CORS restricted, falling back to server stream');
+            activeFetchUrl = downloadUrl;
+          }
+        }
+
+        logStreamEvent(item.id, 'info', `Connecting to stream endpoint: ${activeFetchUrl}${downloaded > 0 ? ` (Resuming from byte ${downloaded})` : ''}`);
+        
+        const reqHeaders: Record<string, string> = { Accept: '*/*' };
+        if (downloaded > 0) {
+          reqHeaders['Range'] = `bytes=${downloaded}-`;
+        }
+
+        const attemptController = new AbortController();
+        const onMasterAbort = () => {
+          try {
+            attemptController.abort();
+          } catch {}
+        };
+        controller.signal.addEventListener('abort', onMasterAbort, { once: true });
+        // Server processing (yt-dlp + ffmpeg) can take up to 2-3 minutes for large videos
+        const timeoutId = setTimeout(() => {
+          try {
+            attemptController.abort();
+          } catch {}
+        }, 180000);
+
+        let response: Response;
+        try {
+          response = await fetch(activeFetchUrl, {
+            signal: attemptController.signal,
+            headers: reqHeaders,
+          });
+        } finally {
+          clearTimeout(timeoutId);
+          controller.signal.removeEventListener('abort', onMasterAbort);
+        }
+
+        // Handle 429 Too Many Requests specifically with automated exponential backoff
+        if (response.status === 429) {
+          attempt++;
+          if (attempt > MAX_RETRIES) {
+            throw new Error(`Exceeded max retries: Server returned HTTP 429 (Too Many Requests)`);
+          }
+
+          // Check Retry-After header (either seconds or HTTP-date)
+          const retryAfterHeader = response.headers.get('retry-after');
+          let backoffMs = BASE_DELAY_MS * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 500);
+          if (retryAfterHeader) {
+            const parsedSeconds = parseInt(retryAfterHeader, 10);
+            if (!isNaN(parsedSeconds) && parsedSeconds > 0) {
+              backoffMs = Math.min(MAX_DELAY_MS, parsedSeconds * 1000);
+            }
+          } else {
+            backoffMs = Math.min(MAX_DELAY_MS, backoffMs);
+          }
+
+          const waitSecs = (backoffMs / 1000).toFixed(1);
+          logStreamEvent(
+            item.id,
+            'warn',
+            `HTTP 429 Too Many Requests detected. Automated Exponential Backoff: waiting ${waitSecs}s before retry ${attempt}/${MAX_RETRIES}...`
+          );
+
+          showToast({
+            title: 'Rate Limit (429) Handled',
+            fileName: `Auto-reconnecting in ${waitSecs}s (${attempt}/${MAX_RETRIES})`,
+            type: 'info',
+            downloadId: item.id,
+          });
+
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
+          if (aborted) break;
+          continue; // retry connection loop
+        }
+
+        // Handle transient 5xx server drops
+        if (response.status >= 500 && response.status <= 504) {
+          attempt++;
+          if (attempt > MAX_RETRIES) {
+            throw new Error(`Server returned HTTP ${response.status} after ${MAX_RETRIES} backoff retries`);
+          }
+
+          const backoffMs = Math.min(MAX_DELAY_MS, BASE_DELAY_MS * Math.pow(2, attempt - 1) + Math.random() * 400);
+          const waitSecs = (backoffMs / 1000).toFixed(1);
+          logStreamEvent(
+            item.id,
+            'warn',
+            `Transient server status ${response.status}. Exponential backoff waiting ${waitSecs}s before retry ${attempt}/${MAX_RETRIES}...`
+          );
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
+          if (aborted) break;
           continue;
         }
 
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        if (value) {
-          collectedChunks.push(value);
-          downloaded += value.byteLength;
-
-          const now = Date.now();
-          const elapsed = (now - lastTime) / 1000;
-          if (elapsed >= 0.25) {
-            currentSpeed = (downloaded - lastBytes) / elapsed;
-            lastTime = now;
-            lastBytes = downloaded;
-
-            const speedMbps = (currentSpeed * 8) / (1024 * 1024);
-            updateStreamProgress(item.id, collectedChunks.length, downloaded, speedMbps);
-
-            const chunkCount = item.chunks.length || 8;
-            const targetTotal = totalBytes || item.totalBytes;
-            const chunkSize = Math.max(1, Math.floor(targetTotal / chunkCount));
-            const updatedChunks: ChunkProgress[] = item.chunks.map((ch, idx) => {
-              const start = idx * chunkSize;
-              const end = idx === chunkCount - 1 ? targetTotal : (idx + 1) * chunkSize;
-              const targetSize = end - start;
-              const chunkDownloaded = Math.min(targetSize, Math.max(0, downloaded - start));
-              return {
-                ...ch,
-                downloadedBytes: chunkDownloaded,
-                totalBytes: targetSize,
-                status: chunkDownloaded >= targetSize ? 'completed' : chunkDownloaded > 0 ? 'downloading' : 'pending',
-                speedMbps: (currentSpeed * 8) / (1024 * 1024 * chunkCount),
-              };
-            });
-
-            onProgress(downloaded, targetTotal, currentSpeed, updatedChunks);
-          }
+        if (!response.ok || !response.body) {
+          throw new Error(`Server returned HTTP ${response.status}`);
         }
-      }
 
-      if (!aborted) {
-        const mimeType =
-          item.category === 'audio'
-            ? 'audio/mpeg'
-            : item.format === 'zip'
-            ? 'application/zip'
-            : 'video/mp4';
-        const finalBlob = new Blob(collectedChunks, { type: mimeType });
-        const isBotFallback =
-          isBotFallbackHeader ||
-          (item.totalBytes > 10 * 1024 * 1024 && finalBlob.size < 400 * 1024);
-
-        finalizeStreamDebug(item.id, 'completed', {
-          sizeBytes: finalBlob.size,
-          mimeType,
-          saveMethodUsed: 'browser_blob_url',
-          verifiedIntegrity: !isBotFallback,
+        const allHeaders: Record<string, string> = {};
+        response.headers.forEach((val, key) => {
+          allHeaders[key.toLowerCase()] = val;
         });
 
-        onComplete(finalBlob, isBotFallback);
-      }
-    } catch (err: any) {
-      if (!aborted) {
-        finalizeStreamDebug(item.id, 'failed', undefined, err.message);
-        onError(err);
+        isBotFallbackHeader =
+          response.headers.get('x-bot-blocked') === '1' ||
+          response.headers.get('x-fallback-stream') === '1';
+
+        const totalHeader = response.headers.get('content-length');
+        if (totalHeader) {
+          const parsed = parseInt(totalHeader, 10);
+          if (downloaded > 0 && response.status === 206) {
+            totalBytes = downloaded + parsed;
+          } else {
+            totalBytes = parsed;
+          }
+        }
+
+        // Record headers in debugger
+        recordStreamHeaders(item.id, {
+          url: downloadUrl,
+          statusCode: response.status,
+          statusText: response.statusText || 'OK',
+          contentLength: totalBytes,
+          contentType: response.headers.get('content-type') || 'application/octet-stream',
+          contentDisposition: response.headers.get('content-disposition') || undefined,
+          acceptRanges: response.headers.get('accept-ranges') || undefined,
+          supportsResuming: (response.headers.get('accept-ranges') || '').toLowerCase().includes('bytes'),
+          isBotBlocked: isBotFallbackHeader,
+          isFallbackStream: isBotFallbackHeader,
+          server: response.headers.get('server') || undefined,
+          latencyMs: Date.now() - streamStartTime,
+          probedAt: Date.now(),
+          allHeaders,
+        });
+
+        const reader = response.body.getReader();
+
+        while (!aborted) {
+          if (isPaused) {
+            await new Promise((r) => setTimeout(r, 200));
+            continue;
+          }
+
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          if (value) {
+            collectedChunks.push(value);
+            downloaded += value.byteLength;
+
+            const now = Date.now();
+            const elapsed = (now - lastTime) / 1000;
+            if (elapsed >= 0.25) {
+              currentSpeed = (downloaded - lastBytes) / elapsed;
+              lastTime = now;
+              lastBytes = downloaded;
+
+              const speedMbps = (currentSpeed * 8) / (1024 * 1024);
+              updateStreamProgress(item.id, collectedChunks.length, downloaded, speedMbps);
+
+              const chunkCount = item.chunks.length || 8;
+              const targetTotal = totalBytes || item.totalBytes;
+              const chunkSize = Math.max(1, Math.floor(targetTotal / chunkCount));
+              const updatedChunks: ChunkProgress[] = item.chunks.map((ch, idx) => {
+                const start = idx * chunkSize;
+                const end = idx === chunkCount - 1 ? targetTotal : (idx + 1) * chunkSize;
+                const targetSize = end - start;
+                const chunkDownloaded = Math.min(targetSize, Math.max(0, downloaded - start));
+                return {
+                  ...ch,
+                  downloadedBytes: chunkDownloaded,
+                  totalBytes: targetSize,
+                  status: chunkDownloaded >= targetSize ? 'completed' : chunkDownloaded > 0 ? 'downloading' : 'pending',
+                  speedMbps: (currentSpeed * 8) / (1024 * 1024 * chunkCount),
+                };
+              });
+
+              onProgress(downloaded, targetTotal, currentSpeed, updatedChunks);
+            }
+          }
+        }
+
+        // Stream completed normally
+        break;
+      } catch (streamErr: any) {
+        if (aborted) break;
+
+        // Check if transient network drop that can be recovered with backoff
+        const isNetworkDrop =
+          streamErr.name === 'TypeError' ||
+          streamErr.name === 'AbortError' ||
+          /network|failed to fetch|offline|connection|closed|reset/i.test(streamErr.message || '');
+
+        if (isNetworkDrop && attempt < MAX_RETRIES) {
+          attempt++;
+          const backoffMs = Math.min(
+            MAX_DELAY_MS,
+            BASE_DELAY_MS * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 400)
+          );
+          const waitSecs = (backoffMs / 1000).toFixed(1);
+          logStreamEvent(
+            item.id,
+            'warn',
+            `Transient network drop detected at ${downloaded} bytes. Exponential backoff auto-resuming in ${waitSecs}s (${attempt}/${MAX_RETRIES})...`
+          );
+
+          showToast({
+            title: 'Transient Network Drop Recovering',
+            fileName: `Resuming in ${waitSecs}s (Attempt ${attempt}/${MAX_RETRIES})`,
+            type: 'info',
+            downloadId: item.id,
+          });
+
+          await new Promise((resolve) => setTimeout(resolve, backoffMs));
+          if (aborted) break;
+          continue; // Retry stream reading with Range resumption
+        } else {
+          // Non-recoverable or max retries exceeded
+          throw streamErr;
+        }
       }
     }
-  })();
+
+    if (!aborted) {
+      if (collectedChunks.length === 0) {
+        throw new Error('Media stream ended without receiving data chunks');
+      }
+
+      const mimeType =
+        item.category === 'audio'
+          ? 'audio/mpeg'
+          : item.format === 'zip'
+          ? 'application/zip'
+          : 'video/mp4';
+      const finalBlob = new Blob(collectedChunks, { type: mimeType });
+      const isBotFallback =
+        isBotFallbackHeader ||
+        (item.totalBytes > 10 * 1024 * 1024 && finalBlob.size < 400 * 1024);
+
+      finalizeStreamDebug(item.id, 'completed', {
+        sizeBytes: finalBlob.size,
+        mimeType,
+        saveMethodUsed: 'browser_blob_url',
+        verifiedIntegrity: !isBotFallback,
+      });
+
+      onComplete(finalBlob, isBotFallback);
+    }
+  } catch (err: any) {
+    if (!aborted) {
+      finalizeStreamDebug(item.id, 'failed', undefined, err.message);
+      onError(err);
+    }
+  }
+})();
 
   return {
     abort: () => {

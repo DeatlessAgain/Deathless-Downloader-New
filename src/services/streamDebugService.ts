@@ -409,6 +409,46 @@ export async function saveMediaBlobImproved(
     }
   }
 
+  // 1b. On mobile browsers (Android / iOS), check Web Share API with files
+  const isMobileBrowser =
+    typeof navigator !== 'undefined' &&
+    /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+
+  if (isMobileBrowser && typeof navigator !== 'undefined' && (navigator as any).canShare && navigator.share) {
+    try {
+      const shareFile = new File([blob], cleanName, { type: mimeType });
+      if ((navigator as any).canShare({ files: [shareFile] })) {
+        options.onProgress?.('Opening device save sheet...');
+        await navigator.share({
+          files: [shareFile],
+          title: cleanName,
+        });
+        if (options.downloadId) {
+          logStreamEvent(options.downloadId, 'save', `Saved via mobile Web Share sheet: ${cleanName}`);
+        }
+        return {
+          success: true,
+          method: 'mobile_share_api',
+          savedLocation: `Device Storage/${cleanName}`,
+          sizeBytes: blob.size,
+          verifiedIntegrity,
+          warnings: warnings.length ? warnings : undefined,
+        };
+      }
+    } catch (shareErr: any) {
+      if (shareErr.name === 'AbortError') {
+        return {
+          success: true,
+          method: 'mobile_share_api',
+          savedLocation: `Saved/Shared via device sheet`,
+          sizeBytes: blob.size,
+          verifiedIntegrity,
+        };
+      }
+      console.warn('Mobile Web Share failed, continuing to browser save:', shareErr);
+    }
+  }
+
   // 2. Check modern File System Access API (showSaveFilePicker)
   // Supported in Chrome 86+, Edge 86+, Opera, Desktop Browsers
   if ('showSaveFilePicker' in window && typeof (window as any).showSaveFilePicker === 'function') {

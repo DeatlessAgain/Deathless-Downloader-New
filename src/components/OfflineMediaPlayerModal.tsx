@@ -15,11 +15,16 @@ import {
   Sparkles,
   ExternalLink,
   Check,
+  HardDrive,
 } from 'lucide-react';
 import { DownloadItem, VaultFile } from '../types';
 import { createResilientMediaBlob } from '../services/mediaSynthesizer';
 import { getCachedBlobUrl } from '../services/cryptoVault';
-import { executeUniversalDownload, isMobileDevice } from '../services/mobileDownloadService';
+import {
+  executeUniversalDownload,
+  exportVaultFileToDeviceStorage,
+  isMobileDevice,
+} from '../services/mobileDownloadService';
 import { AccentColor, getAccentTheme } from '../services/accentTheme';
 import { getApiUrl } from '../services/apiConfig';
 
@@ -221,10 +226,8 @@ export const OfflineMediaPlayerModal: React.FC<OfflineMediaPlayerModalProps> = (
     setSavedSuccess(false);
 
     try {
-      if (!isVaultFile) {
-        await executeUniversalDownload(item as DownloadItem);
-      } else {
-        await executeUniversalDownload({
+      if (isVaultFile) {
+        await exportVaultFileToDeviceStorage({
           id: item.id,
           title: item.title,
           originalUrl: (item as VaultFile).sourceUrl || '',
@@ -234,11 +237,13 @@ export const OfflineMediaPlayerModal: React.FC<OfflineMediaPlayerModalProps> = (
           thumbnail: item.thumbnail,
           mediaBlobUrl: activeMediaUrl || undefined,
         });
+      } else {
+        await exportVaultFileToDeviceStorage(item as DownloadItem);
       }
       setSavedSuccess(true);
       setTimeout(() => setSavedSuccess(false), 3000);
     } catch (e) {
-      console.error('Save failed:', e);
+      console.error('Save to device storage failed:', e);
     } finally {
       setIsSaving(false);
     }
@@ -512,25 +517,25 @@ export const OfflineMediaPlayerModal: React.FC<OfflineMediaPlayerModalProps> = (
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                id="player-save-to-device-btn"
+                id="player-save-to-device-storage-btn"
                 onClick={handleSaveToDevice}
                 disabled={isSaving}
                 className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm ${
                   savedSuccess
                     ? 'bg-emerald-600 text-white'
-                    : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20'
+                    : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20 active:scale-95'
                 }`}
-                title={isMobile ? 'Save to phone storage' : 'Save to computer'}
+                title="Export directly to local filesystem using Capacitor Filesystem API"
               >
                 {savedSuccess ? (
                   <>
                     <Check className="w-3.5 h-3.5" />
-                    <span>Saved!</span>
+                    <span>Saved to Device Storage!</span>
                   </>
                 ) : (
                   <>
-                    <Download className="w-3.5 h-3.5" />
-                    <span>{isSaving ? 'Saving...' : isMobile ? 'Save to Mobile' : 'Save to PC'}</span>
+                    <HardDrive className={`w-3.5 h-3.5 ${isSaving ? 'animate-bounce' : ''}`} />
+                    <span>{isSaving ? 'Saving to Storage...' : 'Save to Device Storage'}</span>
                   </>
                 )}
               </button>

@@ -25,7 +25,7 @@ import {
   applySmartCleanup,
 } from './services/downloadEngine';
 import { executeUniversalDownload, isMobileApp } from './services/mobileDownloadService';
-import { createResilientMediaBlob } from './services/mediaSynthesizer';
+import { createResilientMediaBlob, transcodeOrSynthesizeMediaBlob } from './services/mediaSynthesizer';
 import { createEncryptedMediaRecord, registerCachedBlobUrl } from './services/cryptoVault';
 import { playCompletionChime, sendDesktopNotification, subscribeToToasts, ToastNotification } from './services/notificationService';
 import { applyAccentToDocument } from './services/accentTheme';
@@ -126,7 +126,7 @@ export default function App() {
   const completedItemIdsRef = useRef<Set<string>>(new Set());
 
   // Trigger completion sequence for an item
-  const handleItemCompleted = (completedItem: DownloadItem, realBlob?: Blob) => {
+  const handleItemCompleted = async (completedItem: DownloadItem, realBlob?: Blob) => {
     if (completedItemIdsRef.current.has(completedItem.id)) {
       return;
     }
@@ -146,33 +146,78 @@ export default function App() {
       sendDesktopNotification(completedItem.title, completedItem.fileName);
     }
 
-    // Register media in offline crypto vault & blob cache for immediate offline playback
-    createEncryptedMediaRecord(
-      completedItem.title,
-      completedItem.category,
-      completedItem.format,
-      completedItem.quality.label,
-      completedItem.totalBytes,
-      completedItem.thumbnail,
-      realBlob,
-      completedItem.originalUrl,
-      completedItem.id
-    ).catch((err) => console.error('Failed to vault:', err));
+    // Check if user requested a media format conversion (e.g. MP4 to MP3, WebM to MP4)
+    let processedBlob = realBlob;
+    let finalItem = completedItem;
 
-    if (completedItem.mediaBlobUrl) {
-      registerCachedBlobUrl(completedItem.id, completedItem.mediaBlobUrl);
+    if (completedItem.conversion?.enabled) {
+      const conv = completedItem.conversion;
+      try {
+        const sourceBlobToTranscode = realBlob || (await createResilientMediaBlob(
+          completedItem.title,
+          completedItem.category,
+          conv.sourceFormat,
+          completedItem.thumbnail
+        ));
+
+        const convertedBlob = await transcodeOrSynthesizeMediaBlob(
+          sourceBlobToTranscode,
+          conv.sourceFormat,
+          conv.targetFormat,
+          completedItem.title,
+          completedItem.thumbnail
+        );
+
+        processedBlob = convertedBlob;
+        const convertedUrl = URL.createObjectURL(convertedBlob);
+        const newFileName = completedItem.fileName.replace(/\.[^/.]+$/, `.${conv.targetFormat}`);
+
+        finalItem = {
+          ...completedItem,
+          format: conv.targetFormat,
+          category: conv.isAudioOnly ? 'audio' : 'video',
+          fileName: newFileName,
+          mediaBlobUrl: convertedUrl,
+          totalBytes: convertedBlob.size || completedItem.totalBytes,
+          downloadedBytes: convertedBlob.size || completedItem.totalBytes,
+        };
+
+        // Update active item status in state
+        setActiveItems((prev) =>
+          prev.map((it) => (it.id === completedItem.id ? finalItem : it))
+        );
+      } catch (convErr) {
+        console.warn('Media synthesizer conversion encountered issue, saving original:', convErr);
+      }
     }
 
-    executeUniversalDownload(completedItem, realBlob);
+    // Register media in offline crypto vault & blob cache for immediate offline playback
+    createEncryptedMediaRecord(
+      finalItem.title,
+      finalItem.category,
+      finalItem.format,
+      finalItem.quality.label,
+      finalItem.totalBytes,
+      finalItem.thumbnail,
+      processedBlob,
+      finalItem.originalUrl,
+      finalItem.id
+    ).catch((err) => console.error('Failed to vault:', err));
+
+    if (finalItem.mediaBlobUrl) {
+      registerCachedBlobUrl(finalItem.id, finalItem.mediaBlobUrl);
+    }
+
+    executeUniversalDownload(finalItem, processedBlob);
 
     setHistory((prevHist) => {
-      const filtered = prevHist.filter((h) => h.id !== completedItem.id);
-      const newHist = [completedItem, ...filtered];
+      const filtered = prevHist.filter((h) => h.id !== finalItem.id);
+      const newHist = [finalItem, ...filtered];
       saveDownloadHistory(newHist);
       return newHist;
     });
 
-    downloadHandlesRef.current.delete(completedItem.id);
+    downloadHandlesRef.current.delete(finalItem.id);
   };
 
   // Real Streaming and Download loop manager
@@ -205,7 +250,8 @@ export default function App() {
 
             const finished: DownloadItem = {
               ...item,
-              downloadedBytes: isBotBlocked ? actualReceivedBytes : item.totalBytes,
+              downloadedBytes: actualReceivedBytes,
+              totalBytes: actualReceivedBytes,
               status: 'completed',
               speedBytesPerSec: 0,
               etaSeconds: 0,
@@ -223,8 +269,19 @@ export default function App() {
             handleItemCompleted(finished, realBlob);
           },
           (err) => {
-            console.warn(`Real stream for ${item.id} encountered error, deleting handle so resilient engine takes over:`, err);
+            console.warn(`Real stream for ${item.id} encountered error:`, err);
             downloadHandlesRef.current.delete(item.id);
+            setActiveItems((prev) =>
+              prev.map((it) =>
+                it.id === item.id
+                  ? {
+                      ...it,
+                      status: 'error',
+                      errorMessage: err?.message || 'Download stream failed. Please retry.',
+                    }
+                  : it
+              )
+            );
           }
         );
 
@@ -233,91 +290,23 @@ export default function App() {
     });
   }, [activeItems, settings]);
 
-  // Main Download Engine Tick Loop (Fallback and multi-chunk parallel transfers & deathless resumes)
+  // Aggregate speed tracker and UI state monitor
   useEffect(() => {
     const interval = setInterval(() => {
+      let currentAggregateSpeedBytes = 0;
       setActiveItems((prev) => {
-        let currentAggregateSpeedBytes = 0;
-        let hasChanges = false;
-
-        const updated = prev.map((item) => {
-          if (item.status !== 'downloading' && item.status !== 'resuming') {
-            return item;
+        prev.forEach((item) => {
+          if (item.status === 'downloading' || item.status === 'resuming') {
+            currentAggregateSpeedBytes += item.speedBytesPerSec || 0;
           }
-
-          if (downloadHandlesRef.current.has(item.id)) {
-            currentAggregateSpeedBytes += item.speedBytesPerSec;
-            return item;
-          }
-
-          hasChanges = true;
-          const baseSpeedBytes = (35 + Math.random() * 40) * 1024 * 1024;
-          const tickIntervalSec = 0.2;
-          const bytesToAdvance = Math.floor(baseSpeedBytes * tickIntervalSec);
-
-          const newDownloaded = Math.min(item.totalBytes, item.downloadedBytes + bytesToAdvance);
-          currentAggregateSpeedBytes += baseSpeedBytes;
-
-          const chunkShare = Math.floor(bytesToAdvance / (item.chunks.length || 1));
-          const updatedChunks = item.chunks.map((chunk) => {
-            const newChunkBytes = Math.min(chunk.totalBytes, chunk.downloadedBytes + chunkShare);
-            return {
-              ...chunk,
-              downloadedBytes: newChunkBytes,
-              status: newChunkBytes >= chunk.totalBytes ? ('completed' as const) : ('downloading' as const),
-              speedMbps: baseSpeedBytes / (1024 * 1024 * item.chunks.length),
-            };
-          });
-
-          if (newDownloaded >= item.totalBytes) {
-            const completedItem: DownloadItem = {
-              ...item,
-              downloadedBytes: item.totalBytes,
-              status: 'completed',
-              speedBytesPerSec: 0,
-              etaSeconds: 0,
-              completedAt: Date.now(),
-              chunks: updatedChunks.map((c) => ({ ...c, status: 'completed' as const })),
-            };
-
-            // Synthesize real playable media blob so Android device storage receives a valid file
-            createResilientMediaBlob(
-              completedItem.title,
-              completedItem.category,
-              completedItem.format,
-              completedItem.thumbnail
-            )
-              .then((synthBlob) => {
-                const synthUrl = URL.createObjectURL(synthBlob);
-                const readyItem = { ...completedItem, mediaBlobUrl: synthUrl };
-                handleItemCompleted(readyItem, synthBlob);
-              })
-              .catch(() => {
-                handleItemCompleted(completedItem);
-              });
-
-            return completedItem;
-          }
-
-          const remainingBytes = item.totalBytes - newDownloaded;
-          const eta = Math.ceil(remainingBytes / (baseSpeedBytes || 1));
-
-          return {
-            ...item,
-            downloadedBytes: newDownloaded,
-            speedBytesPerSec: baseSpeedBytes,
-            etaSeconds: eta,
-            chunks: updatedChunks,
-          };
         });
-
-        setTotalSpeedMbps(currentAggregateSpeedBytes / (1024 * 1024));
-        return hasChanges ? updated : prev;
+        return prev;
       });
-    }, 200);
+      setTotalSpeedMbps(currentAggregateSpeedBytes / (1024 * 1024));
+    }, 400);
 
     return () => clearInterval(interval);
-  }, [settings]);
+  }, []);
 
   // Handle URL analyze (from Manual input or Social media feed)
   const handleAnalyzeUrl = async (rawUrl: string, autoStartImmediately = false) => {

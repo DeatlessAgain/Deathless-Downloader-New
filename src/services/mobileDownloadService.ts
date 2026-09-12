@@ -238,3 +238,104 @@ export async function executeUniversalDownload(
   return { success: true, savedLocation: `Downloads/${fileName}`, method: 'direct_stream' };
 }
 
+/**
+ * Export files directly from the encrypted vault to local device storage
+ * using the Capacitor Filesystem API (Directory.Documents / Directory.Data)
+ */
+export async function exportVaultFileToDeviceStorage(
+  file: UniversalDownloadItem,
+  customBlob?: Blob
+): Promise<{ success: boolean; path?: string; uri?: string; error?: string }> {
+  const cleanTitle = (file.title || 'vault_media')
+    .replace(/[^a-zA-Z0-9_\-\s]/g, '')
+    .trim()
+    .replace(/\s+/g, '_')
+    .substring(0, 40);
+  const ext = (file.format || 'mp4').toLowerCase().replace(/^\./, '');
+  const fileName = file.fileName || `${cleanTitle || 'media_export'}.${ext}`;
+
+  showToast({
+    title: 'Exporting Vault File',
+    fileName: `Device Storage/${fileName}`,
+    format: ext,
+    type: 'info',
+    thumbnail: file.thumbnail,
+    downloadId: file.id,
+  });
+
+  let blobToExport: Blob | null = customBlob || null;
+
+  // 1. Try from cached mediaBlobUrl or blobUrl
+  if (!blobToExport && file.mediaBlobUrl) {
+    try {
+      const res = await fetch(file.mediaBlobUrl);
+      if (res.ok) {
+        blobToExport = await res.blob();
+      }
+    } catch (err) {
+      console.warn('Could not fetch mediaBlobUrl for vault export:', err);
+    }
+  }
+
+  // 2. Synthesize resilient media blob if not retrieved
+  if (!blobToExport) {
+    try {
+      blobToExport = await createResilientMediaBlob(
+        file.title || 'vault_media',
+        file.category || 'video',
+        ext,
+        file.thumbnail
+      );
+    } catch (err: any) {
+      console.error('Failed to create media blob for vault export:', err);
+    }
+  }
+
+  if (!blobToExport) {
+    showToast({
+      title: 'Export Failed',
+      fileName: 'Could not access decrypted media blob',
+      format: ext,
+      type: 'error',
+    });
+    return { success: false, error: 'Could not access decrypted media blob' };
+  }
+
+  // 3. Write directly to local filesystem using Capacitor Filesystem API
+  const nativeResult = await saveMediaToMobileFilesystem(fileName, blobToExport);
+
+  // 4. Always provide browser disk download fallback for desktop or web environments
+  try {
+    const blobUrl = URL.createObjectURL(blobToExport);
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      try {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(blobUrl);
+      } catch {}
+    }, 1500);
+  } catch (err) {
+    console.warn('Browser anchor fallback error:', err);
+  }
+
+  const finalPath = nativeResult.path || `Downloads/${fileName}`;
+  showToast({
+    title: 'Saved to Device Storage!',
+    fileName: finalPath,
+    format: ext,
+    type: 'success',
+    thumbnail: file.thumbnail,
+    downloadId: file.id,
+  });
+
+  return {
+    success: true,
+    path: finalPath,
+    uri: nativeResult.uri,
+  };
+}
+

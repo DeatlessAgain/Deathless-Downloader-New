@@ -47,7 +47,11 @@ import {
 } from '../services/cryptoVault';
 import { AccentColor, getAccentTheme } from '../services/accentTheme';
 import { createResilientMediaBlob } from '../services/mediaSynthesizer';
-import { executeUniversalDownload, isMobileDevice } from '../services/mobileDownloadService';
+import {
+  executeUniversalDownload,
+  exportVaultFileToDeviceStorage,
+  isMobileDevice,
+} from '../services/mobileDownloadService';
 import { DownloadItem } from '../types';
 
 interface OfflineVaultProps {
@@ -181,7 +185,7 @@ export const OfflineVault: React.FC<OfflineVaultProps> = ({ initialFileToPlay, d
   const handleExport = async (file: VaultFile) => {
     setIsExporting(true);
     try {
-      await executeUniversalDownload({
+      await exportVaultFileToDeviceStorage({
         id: file.id,
         title: file.title,
         originalUrl: file.sourceUrl || '',
@@ -577,17 +581,18 @@ export const OfflineVault: React.FC<OfflineVaultProps> = ({ initialFileToPlay, d
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
+                        id="vault-player-save-to-storage-btn"
                         disabled={isExporting}
                         onClick={() => handleExport(activePlayItem)}
-                        className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold ${
                           isExporting
                             ? 'bg-emerald-600 text-white animate-pulse'
-                            : 'bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300'
+                            : 'bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
                         }`}
-                        title={isMobileDevice() ? 'Save to phone storage' : 'Save to computer disk'}
+                        title="Export vault file directly to local filesystem using Capacitor Filesystem API"
                       >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>{isExporting ? 'Saving...' : isMobileDevice() ? 'Save to Mobile' : 'Save to PC'}</span>
+                        <HardDrive className={`w-3.5 h-3.5 ${isExporting ? 'animate-bounce' : ''}`} />
+                        <span>{isExporting ? 'Saving to Storage...' : 'Save to Device Storage'}</span>
                       </button>
                     </div>
                   </div>
@@ -932,9 +937,9 @@ export const OfflineVault: React.FC<OfflineVaultProps> = ({ initialFileToPlay, d
                         type="button"
                         onClick={() => handleExport(file)}
                         className={`p-1.5 rounded-lg text-slate-400 hover:${theme.text} transition-colors`}
-                        title="Export decrypted file"
+                        title="Save to Device Storage (Capacitor Filesystem)"
                       >
-                        <Download className="w-3.5 h-3.5" />
+                        <HardDrive className="w-3.5 h-3.5" />
                       </button>
                       <button
                         type="button"
