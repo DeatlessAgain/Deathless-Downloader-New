@@ -79,9 +79,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
-    // PRDownloader (High-speed multi-threaded segmented file download library)
-    implementation("com.mindorks.android:prdownloader:0.6.0")
-
     // WorkManager (Persistent Background Tasks & Guaranteed Execution)
     implementation("androidx.work:work-runtime-ktx:2.9.1")
 
