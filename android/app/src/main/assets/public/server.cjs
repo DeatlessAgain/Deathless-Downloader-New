@@ -1158,65 +1158,209 @@ app.get("/api/download", async (req, res) => {
   const outFormat = (format || (isAudioOnly === "true" ? "mp3" : "mp4")).toLowerCase();
   const filename = `${safeTitle}.${outFormat}`;
   if (import_fs.default.existsSync(ytdlpPath) && platform !== "direct") {
+    const reqId = Date.now() + "_" + Math.random().toString(36).substring(2, 7);
+    const tempOutTemplate = import_path.default.join("/tmp", `dl_${reqId}.%(ext)s`);
     const args = [
       "--js-runtimes",
       "node:node",
       "--no-warnings",
-      "--extractor-args",
-      "youtube:player_client=android"
-      // YouTube Android client bypass
+      "--ffmpeg-location",
+      "/usr/bin/ffmpeg",
+      "--no-playlist"
     ];
     const activeCookies = getActiveCookiesPath();
     if (activeCookies) {
       args.push("--cookies", activeCookies);
     }
     if (isAudioOnly === "true") {
-      args.push("-x", "--audio-format", "mp3");
-    } else if (formatId && formatId !== "best") {
-      args.push("-f", formatId);
+      args.push(
+        "-f",
+        "ba/b[ext=m4a]/251/140/bestaudio/best",
+        "-x",
+        "--audio-format",
+        outFormat === "m4a" ? "m4a" : "mp3",
+        "--audio-quality",
+        "0"
+      );
     } else {
-      args.push("-f", "18/best[ext=mp4]/best");
+      let chosenFormat = "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b/best";
+      if (formatId && formatId !== "best") {
+        if (formatId.includes("bestvideo") || formatId.includes("+") || /^[0-9]+$/.test(formatId)) {
+          chosenFormat = formatId;
+        } else if (/4k|2160/i.test(formatId)) {
+          chosenFormat = "bestvideo[height<=2160]+bestaudio/best";
+        } else if (/2k|1440/i.test(formatId)) {
+          chosenFormat = "bestvideo[height<=1440]+bestaudio/best";
+        } else if (/1080/i.test(formatId)) {
+          chosenFormat = "bestvideo[height<=1080]+bestaudio/best";
+        } else if (/720/i.test(formatId)) {
+          chosenFormat = "bestvideo[height<=720]+bestaudio/best";
+        } else if (/480/i.test(formatId)) {
+          chosenFormat = "bestvideo[height<=480]+bestaudio/best";
+        } else if (/360/i.test(formatId)) {
+          chosenFormat = "bestvideo[height<=360]+bestaudio/best";
+        }
+      }
+      args.push("-f", chosenFormat);
+      args.push("--merge-output-format", outFormat === "webm" ? "webm" : "mp4");
     }
-    args.push("-o", "-", cleanUrl);
-    let headersSent = false;
-    let ytDlpFailed = false;
-    let stderrOutput = "";
+    args.push("-o", tempOutTemplate, cleanUrl);
     const child = (0, import_child_process.spawn)(ytdlpPath, args, {
       env: {
         ...process.env,
         PYTHONWARNINGS: "ignore"
       }
     });
-    child.stderr.on("data", (d) => {
-      const text = d.toString();
-      stderrOutput += text;
-      if (text.includes("Sign in to confirm") || text.includes("bot")) {
-        ytDlpFailed = true;
+    let isStreamingFile = false;
+    const cleanupTempFiles = () => {
+      if (isStreamingFile) return;
+      try {
+        const tmpFiles = import_fs.default.readdirSync("/tmp");
+        for (const f of tmpFiles) {
+          if (f.startsWith(`dl_${reqId}`)) {
+            try {
+              import_fs.default.unlinkSync(import_path.default.join("/tmp", f));
+            } catch {
+            }
+          }
+        }
+      } catch {
       }
-    });
-    child.stdout.once("data", (firstChunk) => {
-      if (!headersSent && !ytDlpFailed) {
-        headersSent = true;
-        res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-        res.setHeader("Content-Type", isAudioOnly === "true" ? "audio/mpeg" : "video/mp4");
-        res.write(firstChunk);
-        child.stdout.pipe(res);
-      }
-    });
-    child.on("close", (code) => {
-      if (code !== 0 && !headersSent) {
-        console.log(`Serving media stream via client fallback (yt-dlp status code ${code})`);
-        streamFallbackMedia(res, filename, isAudioOnly === "true", safeTitle);
-      }
-    });
+    };
     req.on("close", () => {
       try {
         child.kill("SIGKILL");
       } catch {
       }
+      if (!isStreamingFile) {
+        cleanupTempFiles();
+      }
+    });
+    child.on("close", async (code) => {
+      let foundFilePath = null;
+      try {
+        const tmpFiles = import_fs.default.readdirSync("/tmp");
+        const match = tmpFiles.find(
+          (f) => f.startsWith(`dl_${reqId}`) && !f.endsWith(".part") && !f.endsWith(".ytdl") && !f.endsWith(".temp")
+        );
+        if (match) {
+          foundFilePath = import_path.default.join("/tmp", match);
+        }
+      } catch {
+      }
+      if (code === 0 && foundFilePath && import_fs.default.existsSync(foundFilePath)) {
+        try {
+          const stat = import_fs.default.statSync(foundFilePath);
+          const actualExt = import_path.default.extname(foundFilePath).toLowerCase().replace(".", "");
+          let mimeType = "application/octet-stream";
+          if (actualExt === "mp3") mimeType = "audio/mpeg";
+          else if (actualExt === "m4a") mimeType = "audio/mp4";
+          else if (actualExt === "webm" && isAudioOnly === "true") mimeType = "audio/webm";
+          else if (actualExt === "webm") mimeType = "video/webm";
+          else if (actualExt === "mp4") mimeType = "video/mp4";
+          else if (actualExt === "mkv") mimeType = "video/x-matroska";
+          const actualFilename = filename.endsWith(`.${actualExt}`) ? filename : `${safeTitle}.${actualExt}`;
+          res.setHeader("Content-Disposition", `attachment; filename="${actualFilename}"`);
+          res.setHeader("Content-Type", mimeType);
+          res.setHeader("Accept-Ranges", "bytes");
+          res.setHeader("Access-Control-Expose-Headers", "Content-Disposition, Content-Length, Content-Range, Accept-Ranges");
+          isStreamingFile = true;
+          const doFinalCleanup = () => {
+            isStreamingFile = false;
+            cleanupTempFiles();
+          };
+          const range = req.headers.range;
+          if (range) {
+            const parts = range.replace(/bytes=/, "").split("-");
+            const start = parseInt(parts[0], 10);
+            const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+            const chunksize = end - start + 1;
+            res.status(206);
+            res.setHeader("Content-Range", `bytes ${start}-${end}/${stat.size}`);
+            res.setHeader("Content-Length", chunksize.toString());
+            const stream = import_fs.default.createReadStream(foundFilePath, { start, end });
+            stream.pipe(res);
+            stream.on("close", doFinalCleanup);
+            stream.on("error", doFinalCleanup);
+          } else {
+            res.status(200);
+            res.setHeader("Content-Length", stat.size.toString());
+            const stream = import_fs.default.createReadStream(foundFilePath);
+            stream.pipe(res);
+            stream.on("close", doFinalCleanup);
+            stream.on("error", doFinalCleanup);
+          }
+          res.on("finish", doFinalCleanup);
+          res.on("close", doFinalCleanup);
+          return;
+        } catch (streamErr) {
+          isStreamingFile = false;
+          cleanupTempFiles();
+          if (!res.headersSent) {
+            streamFallbackMedia(res, filename, isAudioOnly === "true", safeTitle);
+          }
+          return;
+        }
+      }
+      try {
+        console.warn(`yt-dlp exited with code ${code}, attempting direct upstream resolution...`);
+        const gArgs = [
+          "--no-warnings",
+          "--extractor-args",
+          "youtube:player_client=android,ios,web",
+          "-g",
+          cleanUrl
+        ];
+        if (activeCookies) gArgs.push("--cookies", activeCookies);
+        const upstreamUrls = await new Promise((resolve, reject) => {
+          (0, import_child_process.execFile)(ytdlpPath, gArgs, { timeout: 1e4 }, (err, stdout) => {
+            if (err || !stdout) return reject(err || new Error("No URLs"));
+            const urls = stdout.trim().split("\n").filter((u) => u.startsWith("http"));
+            resolve(urls);
+          });
+        });
+        if (upstreamUrls.length > 0) {
+          const directTarget = isAudioOnly === "true" && upstreamUrls.length > 1 ? upstreamUrls[1] : upstreamUrls[0];
+          const upRes = await fetch(directTarget, {
+            headers: {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+              Accept: "*/*"
+            }
+          });
+          if (upRes.ok && upRes.body) {
+            res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+            if (upRes.headers.get("content-type")) {
+              res.setHeader("Content-Type", upRes.headers.get("content-type"));
+            }
+            if (upRes.headers.get("content-length")) {
+              res.setHeader("Content-Length", upRes.headers.get("content-length"));
+            }
+            res.setHeader("Accept-Ranges", "bytes");
+            const reader = upRes.body.getReader();
+            const pump = async () => {
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                if (!res.write(value)) {
+                  await new Promise((r) => res.once("drain", r));
+                }
+              }
+              res.end();
+            };
+            pump();
+            return;
+          }
+        }
+      } catch (directErr) {
+        console.warn("Direct stream resolution also failed:", directErr);
+      }
+      if (!res.headersSent) {
+        streamFallbackMedia(res, filename, isAudioOnly === "true", safeTitle);
+      }
     });
     child.on("error", (err) => {
-      if (!headersSent) {
+      cleanupTempFiles();
+      if (!res.headersSent) {
         streamFallbackMedia(res, filename, isAudioOnly === "true", safeTitle);
       }
     });
