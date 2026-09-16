@@ -97,7 +97,7 @@ class NativeDownloaderActivity : AppCompatActivity() {
         )
 
         binding.rvDownloads.apply {
-            layoutManager = LinearLayoutManager(this@MainActivity)
+            layoutManager = LinearLayoutManager(this@NativeDownloaderActivity)
             adapter = downloadAdapter
             itemAnimator = null // Avoid flicker during rapid progress updates
         }

@@ -17,7 +17,7 @@ import com.deathless.downloader.R
 import com.deathless.downloader.data.model.DownloadStatus
 import com.deathless.downloader.data.model.DownloadTask
 import com.deathless.downloader.data.repository.DownloadRepository
-import com.deathless.downloader.ui.MainActivity
+import com.deathless.downloader.MainActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
