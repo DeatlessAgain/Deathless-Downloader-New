@@ -127,7 +127,7 @@
 
                         <Button
                             android:id="@+id/btnPaste"
-                            style="@style/Widget.Material3.Button.TonalButton"
+                            style="@style/Widget.MaterialComponents.Button.UnelevatedButton"
                             android:layout_width="wrap_content"
                             android:layout_height="54dp"
                             android:layout_marginStart="8dp"
@@ -210,7 +210,7 @@
 
                 <Button
                     android:id="@+id/btnClearCompleted"
-                    style="@style/Widget.Material3.Button.TextButton"
+                    style="@style/Widget.MaterialComponents.Button.TextButton"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="@string/clear_completed"

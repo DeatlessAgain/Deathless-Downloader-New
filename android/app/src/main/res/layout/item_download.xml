@@ -129,7 +129,7 @@
             <!-- Open File Button (Visible when completed) -->
             <Button
                 android:id="@+id/btnOpenFile"
-                style="@style/Widget.Material3.Button.TonalButton"
+                style="@style/Widget.MaterialComponents.Button.UnelevatedButton"
                 android:layout_width="wrap_content"
                 android:layout_height="34dp"
                 android:layout_marginStart="6dp"
