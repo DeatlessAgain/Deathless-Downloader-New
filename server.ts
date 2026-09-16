@@ -36,18 +36,31 @@ const COOKIES_PATH = path.join(process.cwd(), 'cookies.txt');
 const TMP_COOKIES_PATH = path.join('/tmp', 'youtube_cookies.txt');
 
 function getActiveCookiesPath(): string | null {
-  if (fs.existsSync(COOKIES_PATH)) {
+  const isUsable = (p: string) => {
+    if (!fs.existsSync(p)) return false;
     try {
-      const stat = fs.statSync(COOKIES_PATH);
-      if (stat.size > 0) return COOKIES_PATH;
-    } catch {}
-  }
-  if (fs.existsSync(TMP_COOKIES_PATH)) {
-    try {
-      const stat = fs.statSync(TMP_COOKIES_PATH);
-      if (stat.size > 0) return TMP_COOKIES_PATH;
-    } catch {}
-  }
+      const content = fs.readFileSync(p, 'utf8');
+      if (!content.trim()) return false;
+      // Never use placeholder or fake example tokens
+      if (
+        content.includes('ExampleSecure') ||
+        content.includes('ExampleNID') ||
+        content.includes('example.com') ||
+        content.includes('AuthToken12345')
+      ) {
+        return false;
+      }
+      const validLines = content
+        .split('\n')
+        .filter((l) => l.trim() && !l.startsWith('#') && l.includes('\t'));
+      return validLines.length > 0;
+    } catch {
+      return false;
+    }
+  };
+
+  if (isUsable(COOKIES_PATH)) return COOKIES_PATH;
+  if (isUsable(TMP_COOKIES_PATH)) return TMP_COOKIES_PATH;
   return null;
 }
 
@@ -136,9 +149,22 @@ function normalizeUrl(raw: string): string {
   if (!raw || typeof raw !== 'string') return '';
   let clean = raw.trim();
   if (!clean) return '';
-  if (!/^https?:\/\//i.test(clean)) {
+
+  // Extract the first valid URL if user accidentally concatenated or duplicated links (e.g. https://...https://...)
+  const urlMatches = clean.match(/https?:\/\/[^\s]+/i);
+  if (urlMatches && urlMatches[0]) {
+    clean = urlMatches[0];
+    // If another http:// or https:// was appended directly without a space:
+    const secondHttp = clean.indexOf('http', 4);
+    if (secondHttp > 0) {
+      clean = clean.substring(0, secondHttp);
+    }
+  } else if (!/^https?:\/\//i.test(clean)) {
     clean = `https://${clean}`;
   }
+
+  // Strip trailing punctuation like closing parenthesis, comma, semicolon
+  clean = clean.replace(/[,\);]+$/, '').trim();
   return clean;
 }
 
@@ -1483,8 +1509,13 @@ app.get('/api/download', async (req, res) => {
             return;
           }
         }
-      } catch (directErr) {
-        console.warn('Direct stream resolution also failed:', directErr);
+      } catch (directErr: any) {
+        const msg = String(directErr?.message || directErr);
+        if (msg.includes('Sign in to confirm you’re not a bot') || msg.includes('bot')) {
+          console.warn('[Downloader] Upstream bot verification triggered. Providing streaming fallback.');
+        } else {
+          console.warn('[Downloader] Direct stream resolution info:', msg.substring(0, 100));
+        }
       }
 
       // Graceful fallback stream if all else blocked

@@ -46,20 +46,22 @@ if (import_fs.default.existsSync(ytdlpPath)) {
 var COOKIES_PATH = import_path.default.join(process.cwd(), "cookies.txt");
 var TMP_COOKIES_PATH = import_path.default.join("/tmp", "youtube_cookies.txt");
 function getActiveCookiesPath() {
-  if (import_fs.default.existsSync(COOKIES_PATH)) {
+  const isUsable = (p) => {
+    if (!import_fs.default.existsSync(p)) return false;
     try {
-      const stat = import_fs.default.statSync(COOKIES_PATH);
-      if (stat.size > 0) return COOKIES_PATH;
+      const content = import_fs.default.readFileSync(p, "utf8");
+      if (!content.trim()) return false;
+      if (content.includes("ExampleSecure") || content.includes("ExampleNID") || content.includes("example.com") || content.includes("AuthToken12345")) {
+        return false;
+      }
+      const validLines = content.split("\n").filter((l) => l.trim() && !l.startsWith("#") && l.includes("	"));
+      return validLines.length > 0;
     } catch {
+      return false;
     }
-  }
-  if (import_fs.default.existsSync(TMP_COOKIES_PATH)) {
-    try {
-      const stat = import_fs.default.statSync(TMP_COOKIES_PATH);
-      if (stat.size > 0) return TMP_COOKIES_PATH;
-    } catch {
-    }
-  }
+  };
+  if (isUsable(COOKIES_PATH)) return COOKIES_PATH;
+  if (isUsable(TMP_COOKIES_PATH)) return TMP_COOKIES_PATH;
   return null;
 }
 var upload = (0, import_multer.default)({
@@ -131,9 +133,17 @@ function normalizeUrl(raw) {
   if (!raw || typeof raw !== "string") return "";
   let clean = raw.trim();
   if (!clean) return "";
-  if (!/^https?:\/\//i.test(clean)) {
+  const urlMatches = clean.match(/https?:\/\/[^\s]+/i);
+  if (urlMatches && urlMatches[0]) {
+    clean = urlMatches[0];
+    const secondHttp = clean.indexOf("http", 4);
+    if (secondHttp > 0) {
+      clean = clean.substring(0, secondHttp);
+    }
+  } else if (!/^https?:\/\//i.test(clean)) {
     clean = `https://${clean}`;
   }
+  clean = clean.replace(/[,\);]+$/, "").trim();
   return clean;
 }
 function isRootDomain(urlStr) {
@@ -1352,7 +1362,12 @@ app.get("/api/download", async (req, res) => {
           }
         }
       } catch (directErr) {
-        console.warn("Direct stream resolution also failed:", directErr);
+        const msg = String(directErr?.message || directErr);
+        if (msg.includes("Sign in to confirm you\u2019re not a bot") || msg.includes("bot")) {
+          console.warn("[Downloader] Upstream bot verification triggered. Providing streaming fallback.");
+        } else {
+          console.warn("[Downloader] Direct stream resolution info:", msg.substring(0, 100));
+        }
       }
       if (!res.headersSent) {
         streamFallbackMedia(res, filename, isAudioOnly === "true", safeTitle);

@@ -5,9 +5,22 @@ export function normalizeUrl(raw: string): string {
   if (!raw || typeof raw !== 'string') return '';
   let clean = raw.trim();
   if (!clean) return '';
-  if (!/^https?:\/\//i.test(clean)) {
+
+  // Extract the first valid URL if user accidentally concatenated or duplicated links (e.g. https://...https://...)
+  const urlMatches = clean.match(/https?:\/\/[^\s]+/i);
+  if (urlMatches && urlMatches[0]) {
+    clean = urlMatches[0];
+    // If another http:// or https:// was appended directly without a space:
+    const secondHttp = clean.indexOf('http', 4);
+    if (secondHttp > 0) {
+      clean = clean.substring(0, secondHttp);
+    }
+  } else if (!/^https?:\/\//i.test(clean)) {
     clean = `https://${clean}`;
   }
+
+  // Strip trailing punctuation like closing parenthesis, comma, semicolon that might have been copied
+  clean = clean.replace(/[,\);]+$/, '').trim();
   return clean;
 }
 

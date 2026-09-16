@@ -10,7 +10,7 @@ import {
   Radio,
   FileCheck,
 } from 'lucide-react';
-import { detectPlatform } from '../services/urlParser';
+import { detectPlatform, normalizeUrl } from '../services/urlParser';
 import { PlatformType } from '../types';
 import { AccentColor, getAccentTheme } from '../services/accentTheme';
 
@@ -74,12 +74,12 @@ export const UrlInputBar: React.FC<UrlInputBarProps> = ({
 
   const handlePasteEvent = (e: React.ClipboardEvent<HTMLInputElement>) => {
     const pasted = e.clipboardData.getData('text');
-    if (pasted && pasted.trim().startsWith('http')) {
-      const trimmed = pasted.trim();
-      setInputUrl(trimmed);
-      setDetectedPlatform(detectPlatform(trimmed));
+    if (pasted && pasted.trim()) {
+      const cleaned = normalizeUrl(pasted.trim());
+      setInputUrl(cleaned);
+      setDetectedPlatform(detectPlatform(cleaned));
       if (autoStartOnPaste) {
-        setTimeout(() => onAnalyzeUrl(trimmed, true), 80);
+        setTimeout(() => onAnalyzeUrl(cleaned, true), 80);
       }
     }
   };
@@ -88,13 +88,14 @@ export const UrlInputBar: React.FC<UrlInputBarProps> = ({
     try {
       if (navigator.clipboard && navigator.clipboard.readText) {
         const text = await navigator.clipboard.readText();
-        if (text && text.trim().startsWith('http')) {
-          setInputUrl(text.trim());
-          setDetectedPlatform(detectPlatform(text.trim()));
+        if (text && text.trim()) {
+          const cleaned = normalizeUrl(text.trim());
+          setInputUrl(cleaned);
+          setDetectedPlatform(detectPlatform(cleaned));
           if (autoStartOnPaste) {
-            onAnalyzeUrl(text.trim(), true);
+            onAnalyzeUrl(cleaned, true);
           } else {
-            onAnalyzeUrl(text.trim(), false);
+            onAnalyzeUrl(cleaned, false);
           }
           return;
         }
@@ -110,7 +111,9 @@ export const UrlInputBar: React.FC<UrlInputBarProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputUrl.trim()) return;
-    onAnalyzeUrl(inputUrl.trim(), autoStartOnPaste);
+    const cleaned = normalizeUrl(inputUrl.trim());
+    setInputUrl(cleaned);
+    onAnalyzeUrl(cleaned, autoStartOnPaste);
   };
 
   const handleQuickSample = (url: string) => {

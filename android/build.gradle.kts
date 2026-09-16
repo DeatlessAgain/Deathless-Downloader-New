@@ -12,6 +12,20 @@ buildscript {
 
 apply(from = "variables.gradle")
 
+extra.apply {
+    set("compileSdkVersion", 35)
+    set("targetSdkVersion", 35)
+    set("minSdkVersion", 24)
+}
+
+subprojects {
+    extra.apply {
+        set("compileSdkVersion", 35)
+        set("targetSdkVersion", 35)
+        set("minSdkVersion", 24)
+    }
+}
+
 allprojects {
     repositories {
         google()
