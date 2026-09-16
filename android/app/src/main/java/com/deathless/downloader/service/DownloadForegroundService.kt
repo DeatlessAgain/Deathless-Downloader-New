@@ -191,7 +191,7 @@ class DownloadForegroundService : Service() {
 
                 val buffer = ByteArray(32 * 1024)
                 val inputStream = body.byteStream()
-                var readBytes: Int
+                var readBytes = 0
                 var lastProgressUpdate = System.currentTimeMillis()
                 var bytesInWindow = 0L
                 var currentSpeed = 0L
