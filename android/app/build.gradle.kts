@@ -60,6 +60,20 @@ android {
     }
 }
 
+configurations.all {
+    resolutionStrategy {
+        force(
+            "androidx.core:core:1.13.1",
+            "androidx.core:core-ktx:1.13.1",
+            "androidx.activity:activity:1.9.1",
+            "androidx.activity:activity-ktx:1.9.1",
+            "androidx.appcompat:appcompat:1.7.0",
+            "androidx.fragment:fragment:1.8.1",
+            "androidx.coordinatorlayout:coordinatorlayout:1.2.0"
+        )
+    }
+}
+
 dependencies {
     // Capacitor Android Core & Plugins
     implementation(project(":capacitor-android"))
