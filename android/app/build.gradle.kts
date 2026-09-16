@@ -62,6 +62,10 @@ android {
 configurations.all {
     resolutionStrategy {
         force(
+            "org.jetbrains.kotlin:kotlin-stdlib:2.1.0",
+            "org.jetbrains.kotlin:kotlin-stdlib-jdk8:2.1.0",
+            "org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.1.0",
+            "org.jetbrains.kotlin:kotlin-reflect:2.1.0",
             "androidx.core:core:1.13.1",
             "androidx.core:core-ktx:1.13.1",
             "androidx.activity:activity:1.9.1",
