@@ -61,6 +61,12 @@ android {
 }
 
 dependencies {
+    // Capacitor Android Core & Plugins
+    implementation(project(":capacitor-android"))
+    implementation(project(":capacitor-filesystem"))
+    implementation(project(":capacitor-share"))
+    implementation("androidx.coordinatorlayout:coordinatorlayout:1.2.0")
+
     // AndroidX Core & Lifecycle
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
