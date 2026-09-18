@@ -356,17 +356,41 @@ export default function App() {
     setActiveItems((prev) =>
       prev.map((item) => {
         if (item.id !== id) return item;
-        const isPaused = item.status === 'paused';
+        const willDownload = item.status === 'paused' || item.status === 'error' || item.status === 'queued';
         const handle = downloadHandlesRef.current.get(id);
-        if (isPaused) {
-          handle?.resume();
+        if (willDownload) {
+          if (handle) {
+            handle.resume();
+          } else {
+            downloadHandlesRef.current.delete(id);
+          }
         } else {
           handle?.pause();
         }
         return {
           ...item,
-          status: isPaused ? ('downloading' as const) : ('paused' as const),
-          speedBytesPerSec: isPaused ? item.speedBytesPerSec : 0,
+          status: willDownload ? ('downloading' as const) : ('paused' as const),
+          speedBytesPerSec: willDownload ? item.speedBytesPerSec : 0,
+          errorMessage: willDownload ? undefined : item.errorMessage,
+        };
+      })
+    );
+  };
+
+  // Retry failed or stuck download
+  const handleRetry = (id: string) => {
+    const handle = downloadHandlesRef.current.get(id);
+    handle?.abort();
+    downloadHandlesRef.current.delete(id);
+    setActiveItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== id) return item;
+        return {
+          ...item,
+          status: 'downloading' as const,
+          speedBytesPerSec: 0,
+          errorMessage: undefined,
+          chunks: item.chunks.map((c) => ({ ...c, status: 'downloading' as const })),
         };
       })
     );
@@ -413,13 +437,31 @@ export default function App() {
   // Bulk actions
   const handlePauseAll = () => {
     setActiveItems((prev) =>
-      prev.map((i) => (i.status === 'downloading' ? { ...i, status: 'paused' as const, speedBytesPerSec: 0 } : i))
+      prev.map((i) => {
+        if (i.status === 'downloading' || i.status === 'resuming') {
+          const handle = downloadHandlesRef.current.get(i.id);
+          handle?.pause();
+          return { ...i, status: 'paused' as const, speedBytesPerSec: 0 };
+        }
+        return i;
+      })
     );
   };
 
   const handleResumeAll = () => {
     setActiveItems((prev) =>
-      prev.map((i) => (i.status === 'paused' ? { ...i, status: 'downloading' as const } : i))
+      prev.map((i) => {
+        if (i.status === 'paused' || i.status === 'error' || i.status === 'queued') {
+          const handle = downloadHandlesRef.current.get(i.id);
+          if (handle) {
+            handle.resume();
+          } else {
+            downloadHandlesRef.current.delete(i.id);
+          }
+          return { ...i, status: 'downloading' as const, errorMessage: undefined };
+        }
+        return i;
+      })
     );
   };
 
@@ -537,7 +579,7 @@ export default function App() {
             onTogglePause={handleTogglePause}
             onCancel={handleCancel}
             onSimulateDrop={handleSimulateDrop}
-            onRetry={handleTogglePause}
+            onRetry={handleRetry}
             onPauseAll={handlePauseAll}
             onResumeAll={handleResumeAll}
             onClearCompleted={handleClearCompleted}

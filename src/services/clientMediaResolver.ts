@@ -242,3 +242,140 @@ export function startClientSideDownloadStream(
     },
   };
 }
+
+export interface DirectStreamResolution {
+  directUrl?: string;
+  source: 'direct_url' | 'cobalt_api' | 'invidious_api' | 'client_fallback';
+  mirrors: ManualDownloadMirror[];
+  qualityTag?: string;
+}
+
+/**
+ * Resolves direct media streams for YouTube, TikTok, Instagram, Twitter, and direct links
+ * using public client-side endpoints and extraction without requiring private backend servers.
+ */
+export async function resolveDirectMediaStream(
+  url: string,
+  isAudioOnly = false
+): Promise<DirectStreamResolution> {
+  const cleanUrl = url.trim();
+  const videoId = extractYouTubeVideoId(cleanUrl);
+  const fallbackMirrors = buildFallbackMirrors(cleanUrl, videoId);
+
+  // 1. Direct media file URLs (.mp4, .mp3, .mkv, .webm, .wav, .zip, .iso, etc.)
+  if (/\.(mp4|mp3|mkv|webm|m4a|wav|flac|aac|ogg|zip|rar|tar|gz|7z|iso|bin|apk)(\?.*)?$/i.test(cleanUrl)) {
+    return {
+      directUrl: cleanUrl,
+      source: 'direct_url',
+      mirrors: fallbackMirrors,
+    };
+  }
+
+  // 2. Try Cobalt API public instances (supports YouTube, TikTok, Instagram, Twitter, Reddit, Facebook)
+  const cobaltInstances = [
+    'https://api.cobalt.tools',
+    'https://cobalt-api.kwiatekm.tokyo',
+    'https://co.wuk.sh',
+  ];
+
+  for (const instance of cobaltInstances) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 4500);
+      const res = await fetch(instance, {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          url: cleanUrl,
+          videoQuality: isAudioOnly ? undefined : '720',
+          downloadMode: isAudioOnly ? 'audio' : 'auto',
+          audioFormat: 'mp3',
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+
+      if (res.ok) {
+        const data = await res.json();
+        const streamUrl = data.url || (data.stream && data.stream.url);
+        if (streamUrl && typeof streamUrl === 'string' && streamUrl.startsWith('http')) {
+          return {
+            directUrl: streamUrl,
+            source: 'cobalt_api',
+            mirrors: fallbackMirrors,
+            qualityTag: '720p',
+          };
+        }
+      }
+    } catch {
+      // Continue to next instance or resolver
+    }
+  }
+
+  // 3. For YouTube: Try Invidious Public API instances for direct format streams
+  if (videoId) {
+    const invidiousInstances = [
+      'https://invidious.nerdvpn.de',
+      'https://inv.nadeko.net',
+      'https://yewtu.be',
+      'https://invidious.jing.rocks',
+    ];
+
+    for (const invInstance of invidiousInstances) {
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3500);
+        const res = await fetch(`${invInstance}/api/v1/videos/${videoId}`, {
+          signal: controller.signal,
+          headers: { Accept: 'application/json' },
+        });
+        clearTimeout(timer);
+
+        if (res.ok) {
+          const data = await res.json();
+          const formatStreams = data.formatStreams || [];
+          const adaptiveFormats = data.adaptiveFormats || [];
+
+          if (isAudioOnly) {
+            const audioStream = adaptiveFormats.find(
+              (f: any) => (f.type?.includes('audio') || f.container === 'm4a') && f.url
+            );
+            if (audioStream?.url) {
+              return {
+                directUrl: audioStream.url,
+                source: 'invidious_api',
+                mirrors: fallbackMirrors,
+                qualityTag: 'Audio',
+              };
+            }
+          } else {
+            const video720 =
+              formatStreams.find((f: any) => f.qualityLabel?.includes('720') && f.url) ||
+              formatStreams.find((f: any) => f.qualityLabel?.includes('360') && f.url) ||
+              formatStreams[0];
+            if (video720?.url) {
+              return {
+                directUrl: video720.url,
+                source: 'invidious_api',
+                mirrors: fallbackMirrors,
+                qualityTag: video720.qualityLabel || '720p',
+              };
+            }
+          }
+        }
+      } catch {
+        // Try next instance
+      }
+    }
+  }
+
+  // Fallback to manual mirrors
+  return {
+    source: 'client_fallback',
+    mirrors: fallbackMirrors,
+  };
+}
+

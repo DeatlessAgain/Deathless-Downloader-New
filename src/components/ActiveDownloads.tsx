@@ -574,6 +574,7 @@ export const ActiveDownloads: React.FC<ActiveDownloadsProps> = ({
           const isCompleted = item.status === 'completed';
           const isDownloading = item.status === 'downloading' || item.status === 'resuming';
           const isPaused = item.status === 'paused';
+          const isError = item.status === 'error';
           const speedMb = (item.speedBytesPerSec / (1024 * 1024)).toFixed(1);
 
           return (
@@ -640,22 +641,30 @@ export const ActiveDownloads: React.FC<ActiveDownloadsProps> = ({
                     </button>
                   )}
 
-                  {/* Pause / Resume Button */}
+                  {/* Pause / Resume / Retry Button */}
                   {!isCompleted && (
                     <button
                       type="button"
                       id={`toggle-pause-btn-${item.id}`}
-                      onClick={() => onTogglePause(item.id)}
+                      onClick={() => (isError ? onRetry(item.id) : onTogglePause(item.id))}
                       className={`p-2 rounded-lg border transition-colors ${
-                        isPaused
-                          ? 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-500'
-                          : darkMode
-                            ? 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700'
-                            : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
+                        isError
+                          ? 'bg-red-600 border-red-600 text-white hover:bg-red-500'
+                          : isPaused
+                            ? 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-500'
+                            : darkMode
+                              ? 'bg-zinc-800 border-zinc-700 text-zinc-300 hover:bg-zinc-700'
+                              : 'bg-slate-100 border-slate-200 text-slate-700 hover:bg-slate-200'
                       }`}
-                      title={isPaused ? 'Resume Transfer' : 'Pause Transfer'}
+                      title={isError ? 'Retry Transfer' : isPaused ? 'Resume Transfer' : 'Pause Transfer'}
                     >
-                      {isPaused ? <Play className="w-4 h-4 fill-current" /> : <Pause className="w-4 h-4" />}
+                      {isError ? (
+                        <RotateCcw className="w-4 h-4" />
+                      ) : isPaused ? (
+                        <Play className="w-4 h-4 fill-current" />
+                      ) : (
+                        <Pause className="w-4 h-4" />
+                      )}
                     </button>
                   )}
 
@@ -820,6 +829,15 @@ export const ActiveDownloads: React.FC<ActiveDownloadsProps> = ({
                       <span className="text-amber-500 font-medium flex items-center gap-1">
                         <Pause className="w-3 h-3" /> Paused (Resumable)
                       </span>
+                    )}
+                    {isError && (
+                      <button
+                        type="button"
+                        onClick={() => onRetry(item.id)}
+                        className="text-red-500 hover:text-red-400 font-medium flex items-center gap-1 underline decoration-dotted"
+                      >
+                        <AlertTriangle className="w-3.5 h-3.5" /> Tap to Retry
+                      </button>
                     )}
                     {isCompleted && (
                       item.botChallengeTriggered || item.isFallbackStream ? (
